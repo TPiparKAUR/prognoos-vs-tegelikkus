@@ -103,10 +103,11 @@ Formaat: kontekst · alternatiivid · poolt/vastu · valik · tagajärjed · all
 - Fakt (ECMWF avaandmed, 13.11.2026): IFS 0,1° on olemas (`ifs/0p1/oper`, failid `-sfc`/`-pl`, ka Google'i ja AWS-i peeglis), sammud samad mis 0,25° puhul; `z` ja `lsm` sammul 0.
 - Valik: mudel `ifs-0p1` (sama ingest, oma ala 57,2–60,3° N × 21,0–28,8° E, 0,1° samm; 2528 punkti). Lehel „IFS 9 km (KAURi asukohaprognoosi alus)"; KAURi lehe meetodile vastab interpolatsioon „Lähim ruudupunkt".
 - Piirang (Tõlgendus): see on sama mudel ja meetod, mitte KAURi serveri väärtused. KAUR võib kasutada ECMWF-i liikmesriigi levitust (natiivne ruudustik, varasem kättesaadavus) ja lisatöötlust. Kokkulangevust tuleb kontrollida mõne KAURi lehelt käsitsi salvestatud näidisega.
+- Esimene arhiveerimine GitHubis 13.11.2026: 6 jooksu (12.11 00Z … 13.11 06Z), 00/12 ~1,3 GB / 125–144 s, 06/18 ~0,7 GB / 71–89 s (Google). `10fg` puudub 0,1° failides (ecmwf-opendata soovitab `10fg3`) – valikuline, jäetakse vahele.
 - Maht (mõõdetud 2 sammu: 28,9 MB): ~1,2 GB 00/12 jooksu ja ~0,7 GB 06/18 jooksu kohta → ~3,8 GB allalaadimist ööpäevas; arhiivi jääb ainult jaamade ümbrus.
 
 **ADR-022 Täiendavad tasuta prognoosiallikad (kandidaadid)** (staatus: ettepanek; kontrollitud GitHubi runnerilt 13.11.2026)
-- FMI avaandmed (CC BY 4.0, WFS): `fmi::forecast::meps::surface::point::*` (MEPS/HARMONIE), `fmi::forecast::edited::weather::scandinavia::point::*` (FMI sünoptikute toimetatud prognoos), `ecmwf::forecast::surface::point::*`. Eesti katvus: kontrollimisel.
+- FMI avaandmed (CC BY 4.0, WFS): `fmi::forecast::meps::surface::point::*` (MEPS/HARMONIE), `fmi::forecast::edited::weather::scandinavia::point::*` (FMI sünoptikute toimetatud prognoos), `ecmwf::forecast::surface::point::*`. Eesti katvus kinnitatud 13.11.2026 (Tallinn-Harku 59,398 N 24,603 E): MEPS 150, toimetatud 216, ECMWF 108 väärtust; nt 15 UTC temperatuur 1,9 / 2,23 / 2,5 °C, rõhk 981,4 / 981,4 / 980,9 hPa. ECMWF punktpäringu tuul tuli NaN.
 - MET Norway Locationforecast 2.0 (api.met.no): Tallinn-Harku punkt vastas tunniandmetega; tingimused nõuavad User-Agentis rakenduse nime ja kontakti (kasutame repo URL-i, mitte isikuandmeid); ainult viimane prognoos → tuleb ise arhiveerida.
 - Open-Meteo: 7 mudelit (ICON-EU, MET Nordic, DMI HARMONIE, KNMI HARMONIE, ECMWF IFS 0,25, GFS, ARPEGE) ja Previous Runs API (ajalugu alates 2024) – kõik vastasid. **Tasuta API ainult mittekaubanduslikuks kasutuseks** (andmed CC BY 4.0) – KAURi kasutus vajab otsust/kinnitust.
 - DWD ICON-EU GRIB (opendata.dwd.de, CC BY 4.0): kättesaadav, suur maht.
