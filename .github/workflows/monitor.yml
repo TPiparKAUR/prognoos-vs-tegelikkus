@@ -1,3 +1,4 @@
+# Schedules fire only on the default branch (main, ADR-010).
 # Freshness + 14-day run inventory. A red run (exit 1) triggers GitHub's failure e-mail to
 # the repository owner (the notification channel until KAUR names another, docs/07).
 name: monitor

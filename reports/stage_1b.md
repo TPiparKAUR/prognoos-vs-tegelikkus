@@ -1,6 +1,6 @@
 # Etapp E1b – KAURi allikad, jaamaregister, jaamapõhine ECMWF-arhiiv, GitHubi käitus
 
-**Kuupäev:** 2026-11-13 · **Haru (= repo vaikeharu):** `claude/modest-johnson-mo063h`
+**Kuupäev:** 2026-11-13 · **Haru:** `main` (alates 13.11 pärastlõunast; varem `claude/modest-johnson-mo063h`)
 
 ## Tellija otsused, mis siin ellu viidi
 | Otsus | Teostus |
@@ -92,3 +92,24 @@ Päris andmetel: ECMWF IFS + AIFS 2026-11-12 12Z; kliima-API 2026-11-11…13.
 ## Järgmine etapp (E2)
 Paarid ja QC: jaamaväärtused (`load_points`) × T1/T2 vaatlused ühisel valimil, 24 h sademed
 veapiiriga (ADR-005), QC-lipud (docs/01 §10), KAURi prognoosi vastavus kohtadele.
+
+## Jätk 2026-11-13 pärastlõuna
+- **Ajastus:** kella 12:50 UTC seisuga polnud ühtegi `schedule`-käivitust (19 käivitust, kõik
+  `push` või `workflow_dispatch`). Tellija otsus: kõik harule `main`, edaspidine arendus seal.
+  `main` = `claude/modest-johnson-mo063h` + see commit (fast-forward). Töövoo failidesse lisati
+  kommentaaririda, et GitHub registreeriks ajastuse uuesti, kui `main` vaikeharuks seatakse.
+  **Vaikeharu vahetus on omaniku samm** (Settings → General → Default branch → `main`) – mul
+  pole selleks tööriista.
+- **Asukohaprognoos (ADR-017):** andmepäringu aadress leitud lehe HTML-ist:
+  `https://ilmmicroservice.envir.ee/api/forecasts/modelForecastByLocation?locationId=<id>&lang=et&coordinates=<lat>;<lon>&showWarnings=1`
+  (JSONP, `meteogram_loader.js`). Tellija lubas teenust pärida. Arenduskeskkonnast vastas
+  server tühja vastusega (HTTP/2 `ENHANCE_YOUR_CALM`, seejärel HTTP/1.1 „Empty reply"); brauseri
+  päiseid ei jäljendata. Ingesti ei kirjutatud – vastuse vorming on teadmata.
+- **Võrk:** `www.ilmateenistus.ee`, `keskkonnaandmed.envir.ee` ja `data.ecmwf.int` on nüüd
+  arenduskeskkonnast kättesaadavad; `avaandmed.keskkonnaportaal.ee` (BUFR) endiselt keelatud.
+
+### Avatud (lisaks ülaltoodule)
+7. Asukohaprognoosi vastuse näidis: ava brauseris
+   `https://ilmmicroservice.envir.ee/api/forecasts/modelForecastByLocation?lang=et&coordinates=59.398122;24.60287`
+   (Tallinn-Harku), salvesta vastus faili `tests/fixtures/location_forecast_sample.json`.
+   Kui ilma `locationId`-ta ei tööta, siis lehe kaudu saadud täis-URL.

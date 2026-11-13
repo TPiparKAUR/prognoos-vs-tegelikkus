@@ -66,7 +66,7 @@ Formaat: kontekst · alternatiivid · poolt/vastu · valik · tagajärjed · all
 - Tagajärg: läved 0,2/1/5/10/20 mm jäävad (ADR-005 algne), kuid 0,2 mm tulemusega kaasneb alati ebamääraste juhtude osakaal.
 
 **ADR-010 (muudetud) Käituskeskkond: GitHub (avalik repo)** (staatus: kinnitatud tellija poolt)
-- Fakt: repo `TPiparKAUR/prognoos-vs-tegelikkus` on avalik, vaikeharu `claude/modest-johnson-mo063h`; ajastatud töövood käivituvad sellelt harult.
+- Fakt: repo `TPiparKAUR/prognoos-vs-tegelikkus` on avalik. Tellija otsus 2026-11-13: kogu töö ja edasine arendus harul **`main`**, mis peab olema repo vaikeharu (Settings → General → Default branch); ajastatud töövood käivituvad ainult vaikeharult. Varasem vaikeharu `claude/modest-johnson-mo063h` on `main`-i eellane ega saa enam muudatusi.
 - Arhiiv: GitHub Release'id `archive-YYYY-MM`, üks tar andmestik-päeva kohta, `archive-meta` jaamaregistrile. Release'id on avalikud → sisaldavad ainult avaandmeid (ECMWF CC BY 4.0, KAUR CC BY 4.0 / viitamise tingimusega XML) ja viidet allikatele. KAURi prognoosi **skoore** ei avaldata (ADR-012); toorarhiiv ei ole skoor.
 - Teavitus: punane ajastatud töövoog → GitHubi e-kiri repo omanikule.
 
@@ -77,5 +77,6 @@ Formaat: kontekst · alternatiivid · poolt/vastu · valik · tagajärjed · all
 
 **ADR-017 KAURi asukohaprognoos (ilmateenistus.ee „asukoha-prognoos") on peamine KAURi võrdlusprognoos** (staatus: ootab andmeallikat)
 - Kontekst: tellija soovib eelkõige valideerida asukohapõhist prognoosi (tunnipõhine temperatuur, rõhk, tuul, sademed, nähtus). Leht kuvab Highchartsi meteogrammi, mille andmed laaditakse JavaScriptiga.
-- Teadmata: andmepäringu URL ja vorming (www.ilmateenistus.ee ei olnud arendussessioonist ligipääsetav). Lõpp-punkti ei oletata.
+- Fakt (2026-11-13, asukohaprognoosi lehe HTML, muutuja `_var["meteogramDataUri"]`): leht laeb andmed JSONP-päringuga `https://ilmmicroservice.envir.ee/api/forecasts/modelForecastByLocation?locationId=<id>&lang=et&coordinates=<lat>;<lon>&showWarnings=1` (`meteogram_loader.js`: `$.getJSON(uri + '&callback=?')`). Tellija lubas teenust selle projekti jaoks pärida.
+- Teadmata: vastuse vorming (väljad, ühikud, ajavöönd, mudeli/jooksu aeg), kas `locationId` on kohustuslik, päringulimiidid. Arenduskeskkonnast katkestas server ühenduse vastuseta; brauseri päiseid ei jäljendata. Parser kirjutatakse alles päris vastuse näidise põhjal.
 - Plaan: hetktõmmis igal jooksul jaamade koordinaatidel, toorvastus + Parquet ainult muutusel; skoorid ainult sisevaates kuni avaldamisotsuseni (ADR-012).

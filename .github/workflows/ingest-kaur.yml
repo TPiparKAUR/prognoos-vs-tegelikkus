@@ -1,3 +1,4 @@
+# Schedules fire only on the default branch (main, ADR-010).
 # KAUR observations XML (T1, no history -> every 10 min) and 'Eesti prognoos' XML snapshots.
 # Source: Keskkonnaagentuur, https://www.ilmateenistus.ee (cite KAUR + link).
 name: ingest-kaur
