@@ -46,10 +46,14 @@ Mälu max 203 MB. Väärtused mõistlikud: analüüsihetkel Tallinna lähedal (5
 997,34 hPa, AIFS 4,59 °C / 997,32 hPa. Kordusjooks: mõlemad vahele jäetud 0,4 s-ga, võrgupäringuid ei
 tehtud. Monitor: exit 1 („stale", vanus 24,9 h) – õige, sest arhiveeritud oli ainult üks jooks.
 
-**Hinnang mahule** (mõõdetud failidest ekstrapoleeritud): IFS 00/12 ~0,33 MB, 06/18 ~0,19 MB, AIFS
-~0,22 MB jooksu kohta → ~2 MB ööpäevas, ~0,7 GB aastas. Allalaadimine ~1,2 GB ööpäevas (mõõtmata –
-`bytes_downloaded` loeti esimesel jooksul valesti; parandatud, mõõdetakse järgmisel jooksul).
-Kestus AWS-ist ~6–8 min jooksu kohta → 8 jooksu ööpäevas ≈ 1 h runneri aega.
+**Idempotentsus päris andmetel:** AIFS-i sama jooks uuesti `--force --source google` → 142,3 MB
+allalaadimist, 105 s, ja **baidiliselt identne** Parquet AWS-ist laaditud failiga (SHA-256 võrdne).
+Seega on ka peeglid omavahel vahetatavad.
+
+**Hinnang mahule** (mõõdetud failidest ekstrapoleeritud): arhiiv IFS 00/12 ~0,33 MB, 06/18 ~0,19 MB,
+AIFS ~0,22 MB jooksu kohta → ~2 MB ööpäevas, ~0,7 GB aastas. Allalaadimine: AIFS 142 MB jooksu kohta
+(mõõdetud), IFS-i jaoks hinnanguliselt ~140 MB (06/18) ja ~240 MB (00/12) → ~1,3 GB ööpäevas. Kestus:
+Google ~2 min, AWS 6–8 min jooksu kohta → 8 jooksu ööpäevas ≈ 15–60 min runneri aega.
 
 ## Testid
 
@@ -59,7 +63,7 @@ Kestus AWS-ist ~6–8 min jooksu kohta → 8 jooksu ööpäevas ≈ 1 h runneri 
 - Kaetud: naiivne datetime, ühikud (sh tundmatu ühik), kasti väljalõige kolme pikkuskraadi
   konventsiooniga, rõhupinna-väljade vahelejätmine, vale ruudusamm, peegli varuvalik, osaline jooks ja
   selle hilisem lõpetamine, noor/vana puuduv jooks, rikutud arhiivifaili taastamine, baidiline
-  idempotentsus (`--force`), katkestus, puuduv parameeter, kahanev akumulatsioon (üle/alla
+  idempotentsus (`--force`; päris andmetel vt eespool), katkestus, puuduv parameeter, kahanev akumulatsioon (üle/alla
   pakkimistäpsuse), monitori vananemine ja inventuur, `shuffle=True`/naiivse `now()` staatiline keeld.
 
 ## Eeldused (kontrollimata või töö-otsused)
@@ -97,7 +101,7 @@ Kestus AWS-ist ~6–8 min jooksu kohta → 8 jooksu ööpäevas ≈ 1 h runneri 
    ≥ 0,5 mm **või** rakendada läve ainult siis, kui veapiir seda lubab. Kas see sobib või muudame
    ADR-005-t?
 6. **Backfill AWS-ist (F2):** kas soovid ajalugu (nt 2026-05-13 → täna, ~6 kuud ≈ 1 440 jooksu; hinnanguliselt
-   ~240 GB allalaadimist ja 80–170 h runneri aega mõõdetud kiirustel)? Enne 2026-05-13 vajab eraldi tööd.
+   ~240 GB allalaadimist ja 50–170 h runneri aega mõõdetud kiirustel)? Enne 2026-05-13 vajab eraldi tööd.
 
 ## Mida kontrollida
 - `uv run pvt ingest-ecmwf --dry-run` sihtkeskkonnas (runneri välisvõrk, peeglite kiirus).
