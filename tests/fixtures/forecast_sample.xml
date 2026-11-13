@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<forecasts>
+<forecast date="2026-11-13">
+<night>
+<phenomenon>Moderate sleet</phenomenon>
+<tempmin>0</tempmin>
+<tempmax>5</tempmax>
+<text>Pilves, üksikute selgimistega ilm. Sajab vihma ja lörtsi. Puhub kagu- ja lõunatuul, 5-10, puhanguti 14, rannikul 9-14, puhanguti 18 m/s, pärast südaööd pöördub tuul saartel ja läänerannikul edelasse. Õhutemperatuur on 0..+3, saarte rannikul kuni +5°C. Libeduseoht!</text>
+<place>
+<name>Harku</name>
+<phenomenon>Moderate sleet</phenomenon>
+<tempmin>1</tempmin>
+</place>
+<place>
+<name>Jõhvi</name>
+<phenomenon>Moderate snowfall</phenomenon>
+<tempmin>1</tempmin>
+</place>
+<place>
+<name>Tartu</name>
+<phenomenon>Moderate sleet</phenomenon>
+<tempmin>1</tempmin>
+</place>
+<place>
+<name>Pärnu</name>
+<phenomenon>Moderate rain</phenomenon>
+<tempmin>2</tempmin>
+</place>
+<place>
+<name>Kuressaare</name>
+<phenomenon>Moderate shower</phenomenon>
+<tempmin>4</tempmin>
+</place>
+<place>
+<name>Türi</name>
+<phenomenon>Moderate sleet</phenomenon>
+<tempmin>1</tempmin>
+</place>
+<wind>
+<name>Kuusiku</name>
+<direction>Southeast wind</direction>
+<speedmin>5</speedmin>
+<speedmax>10</speedmax>
+<gust>12</gust>
+</wind>
+<wind>
+<name>Väike-Maarja</name>
+<direction>Southeast wind</direction>
+<speedmin>7</speedmin>
+<speedmax>10</speedmax>
+<gust>13</gust>
+</wind>
+<wind>
+<name>Võrtsjärv</name>
+<direction>Southeast wind</direction>
+<speedmin>5</speedmin>
+<speedmax>10</speedmax>
+<gust>13</gust>
+</wind>
+<sea>Ilmaprognoos Läänemere kohta 24 tunniks 07:00 UTC 13.11 kuni 07:00 UTC 14.11.2026. (fixture: rest of text shortened)</sea>
+<peipsi>Puhub kagutuul 8-13, puhanguti kuni 17 m/s. Laine kõrgus on 1-1,7 m. Sajab lörtsi ja vihma. Nähtavus mõõdukas või halb. Õhutemperatuur on 1..3°C.</peipsi>
+</night>
+<day>
+<phenomenon>Moderate shower</phenomenon>
+<tempmin>1</tempmin>
+<tempmax>7</tempmax>
+<text>Pilves selgimistega ilm. Mitmel pool sajab vihma, sekka tuleb lörtsi, Ida-Eestis hommikupoolikul kohati ka lund.</text>
+<place>
+<name>Harku</name>
+<phenomenon>Moderate shower</phenomenon>
+<tempmax>4</tempmax>
+</place>
+<place>
+<name>Jõhvi</name>
+<phenomenon>Moderate sleet</phenomenon>
+<tempmax>2</tempmax>
+</place>
+<wind>
+<name>Kuusiku</name>
+<direction>South wind</direction>
+<speedmin>6</speedmin>
+<speedmax>10</speedmax>
+<gust>14</gust>
+</wind>
+<sea/>
+<peipsi>Puhub kagu- ja lõunatuul 6-11, puhanguti 15 m/s, õhtul pöördub edelasse.</peipsi>
+</day>
+</forecast>
+<forecast date="2026-11-14">
+<night>
+<phenomenon>Moderate sleet</phenomenon>
+<tempmin>-1</tempmin>
+<tempmax>5</tempmax>
+<text>Pilves selgimistega ilm. Mitmel pool sajab vihma, mandril sekka ka lörtsi ja lund.</text>
+</night>
+<day>
+<phenomenon>Moderate shower</phenomenon>
+<tempmin>1</tempmin>
+<tempmax>7</tempmax>
+<text>Pilves selgimistega ilm. Mitmel pool sajab vihma, mandril sekka ka lörtsi.</text>
+</day>
+</forecast>
+</forecasts>

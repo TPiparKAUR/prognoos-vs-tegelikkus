@@ -20,6 +20,9 @@ expected_steps."00" = [[0, 144, 3], [150, 360, 6]]
 expected_steps."06" = [[0, 144, 3]]
 expected_steps."12" = [[0, 144, 3], [150, 360, 6]]
 expected_steps."18" = [[0, 144, 3]]
+# 10 m wind gust: stepType=max over the preceding 1 h up to step 144 (stepRange "2-3",
+# "5-6") and 6 h beyond ("144-150") -- observed in GRIB 2026-11-12. AIFS has no gust.
+extra_step_params = ["10fg"]
 # Earliest issue time this code is allowed to archive (backfill guard). Before
 # 2026-05-12 the 06/18 UTC runs used stream=scda; not tested in stage E1.
 min_issue_time_utc = "2026-05-13T06:00:00Z"

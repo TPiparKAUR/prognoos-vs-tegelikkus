@@ -53,6 +53,7 @@ class ModelConfig:
     expected_steps: dict[int, tuple[int, ...]]
     min_issue_time: dt.datetime
     cycles: tuple[ModelCycle, ...]
+    extra_step_params: tuple[str, ...] = ()
 
     def cycle_for(self, issue_time: dt.datetime) -> str:
         """Return the model cycle label for a run, or ``"unknown"``."""
@@ -165,6 +166,7 @@ def _parse_models(params: dict[str, Any]) -> dict[str, ModelConfig]:
             expected_steps=expected,
             min_issue_time=parse_utc(m["min_issue_time_utc"]),
             cycles=cycles,
+            extra_step_params=tuple(m.get("extra_step_params", [])),
         )
     return models
 

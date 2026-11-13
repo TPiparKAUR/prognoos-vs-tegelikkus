@@ -13,7 +13,13 @@ import pytest
 from pvt.config import Settings
 from pvt.ingest.ecmwf import discover_run, ingest, ingest_run, relative_key
 from pvt.ingest.ecmwf_grib import BoxExtractor, GribContentError, read_box_fields
-from pvt.schemas import FORECAST_GRID, FORECAST_GRID_KEY, validate
+from pvt.schemas import (
+    FORECAST_GRID,
+    FORECAST_GRID_KEY,
+    FORECAST_POINT,
+    FORECAST_POINT_KEY,
+    validate,
+)
 from pvt.storage import ecmwf_grid_path, ecmwf_manifest_path, read_json, sha256_file
 from tests.conftest import ISSUE, TEST_AREA, TEST_STEPS, FakeFetcher, field_value, write_grib
 
@@ -108,29 +114,53 @@ def test_complete_run_is_archived_and_valid(settings: Settings) -> None:
     assert man["status"] == "complete"
     assert man["steps_archived"] == list(TEST_STEPS)
     assert man["steps_missing"] == []
-    gpath = ecmwf_grid_path(settings.data_root, "ifs", ISSUE, "grid")
-    df = pl.read_parquet(gpath)
-    validate(df, FORECAST_GRID, FORECAST_GRID_KEY)
-    assert df.height == len(TEST_STEPS) * 32
-    assert set(df.get_column("model_cycle").unique()) == {"50r1"}
-    # explicit unit conversions: K -> degC, Pa -> hPa, m -> mm
-    row = df.filter(
-        (pl.col("lead_h") == 6)
-        & (pl.col("grid_lat_deg") == 59.0)
-        & (pl.col("grid_lon_deg") == 24.0)
-    ).row(0, named=True)
-    assert row["t2m_degC"] == pytest.approx(270.0 + 5.9 + 0.24 + 3.0 - 273.15, abs=1e-3)
-    assert row["mslp_hPa"] == pytest.approx((101_000.0 + 590.0 + 30.0) / 100.0, abs=1e-3)
-    assert row["precip_acc_mm"] == pytest.approx(0.0001 * 6 * 1.02 * 1000.0, abs=1e-3)
-    assert row["precip_acc_start_h"] == 0
-    assert row["source_uri"].endswith("20261112060000-6h-oper-fc.grib2")
+    assert man["stations"] == 2
+    assert man["stations_skipped_outside_area"] == ["S3"]
+    grid = pl.read_parquet(ecmwf_grid_path(settings.data_root, "ifs", ISSUE, "grid"))
+    validate(grid, FORECAST_GRID, FORECAST_GRID_KEY)
+    # only stencil points are archived: S1 4 corners (+ nearest land among them),
+    # S2 4 corners + nearest land outside them
+    n_points = grid.select("grid_lat_deg", "grid_lon_deg").unique().height
+    assert n_points == 9
+    assert grid.height == len(TEST_STEPS) * n_points
     static = pl.read_parquet(ecmwf_grid_path(settings.data_root, "ifs", ISSUE, "static"))
-    assert static.height == 32
-    srow = static.filter((pl.col("grid_lat_deg") == 59.0) & (pl.col("grid_lon_deg") == 24.0)).row(
-        0, named=True
-    )
-    assert srow["grid_orog_m"] == pytest.approx(69.0, abs=1e-3)
-    assert srow["grid_lsm_frac"] == 1.0
+    assert static.height == n_points
+
+    pts = pl.read_parquet(ecmwf_grid_path(settings.data_root, "ifs", ISSUE, "point"))
+    validate(pts, FORECAST_POINT, FORECAST_POINT_KEY)
+    assert pts.height == len(TEST_STEPS) * (3 + 3)  # 2 stations x 3 methods
+    s1 = pts.filter((pl.col("station_id") == "S1") & (pl.col("lead_h") == 6))
+    bil = s1.filter(pl.col("interp_method") == "bilinear").row(0, named=True)
+    # bilinear interpolation is exact for the linear synthetic fields
+    t2m = 270.0 + 0.1 * 58.5 + 0.01 * 24.25 + 0.5 * 6 - 273.15
+    assert bil["t2m_degC"] == pytest.approx(t2m, abs=1e-3)
+    assert bil["grid_orog_m"] == pytest.approx(10.0 + 58.5, abs=1e-3)
+    assert bil["t2m_hcorr_degC"] == pytest.approx(t2m - 0.0065 * (20.0 - 68.5), abs=1e-3)
+    assert bil["mslp_hPa"] == pytest.approx((101_000.0 + 585.0 + 30.0) / 100.0, abs=1e-3)
+    assert bil["precip_acc_mm"] == pytest.approx(0.0001 * 6 * 1.015 * 1000.0, abs=1e-3)
+    assert bil["gust10m_max_m_s"] == pytest.approx(8.0 + 0.585 + 0.6, abs=1e-3)
+    assert bil["gust_window_start_h"] == 5
+    assert bil["grid_lat_deg"] is None
+    u = 3.0 + 0.2425 + 0.6
+    v = -2.0 + 0.585
+    assert bil["wind10m_speed_m_s"] == pytest.approx((u * u + v * v) ** 0.5, abs=1e-3)
+    assert bil["station_height_m_EH2000"] == 20.0
+    near = s1.filter(pl.col("interp_method") == "nearest").row(0, named=True)
+    # equidistant in latitude; 0.25 deg of longitude is shorter at 59N -> (59, 24)
+    assert (near["grid_lat_deg"], near["grid_lon_deg"]) == (59.0, 24.0)
+    s2_land = pts.filter(
+        (pl.col("station_id") == "S2") & (pl.col("interp_method") == "nearest_land")
+    ).row(0, named=True)
+    assert (s2_land["grid_lat_deg"], s2_land["grid_lon_deg"]) == (59.0, 23.0)
+    assert s2_land["grid_lsm_frac"] == 1.0
+    assert s2_land["source_uri"].startswith("ecmwf-opendata:20261112/06z/ifs/")
+
+
+def test_aifs_has_no_gust(settings: Settings) -> None:
+    man = _run(settings, FakeFetcher("aws", set(TEST_STEPS)), model_id="aifs-single")
+    assert man["status"] == "complete"
+    pts = pl.read_parquet(ecmwf_grid_path(settings.data_root, "aifs-single", ISSUE, "point"))
+    assert pts.get_column("gust10m_max_m_s").null_count() == pts.height
 
 
 def test_rerun_skips_complete_runs(settings: Settings) -> None:
@@ -159,7 +189,7 @@ def test_modified_archive_file_triggers_reingest(settings: Settings) -> None:
     gpath.write_bytes(b"corrupt")
     res = ingest(settings, ["ifs"], start=ISSUE, end=ISSUE, now=NOW, fetchers=[f])
     assert [r.status for r in res] == ["complete"]
-    assert pl.read_parquet(gpath).height == len(TEST_STEPS) * 32
+    assert pl.read_parquet(gpath).height == len(TEST_STEPS) * 9
 
 
 def test_partial_run_then_completed_later(settings: Settings) -> None:
@@ -261,3 +291,17 @@ def test_packing_quantum_is_archived(settings: Settings) -> None:
     # step 0 tp is a constant field -> quantum 0; later steps are packed with 24 bits
     assert q.get_column("precip_acc_quantum_mm")[0] == 0.0
     assert all(0 < v < 1e-3 for v in q.get_column("precip_acc_quantum_mm")[1:])
+
+
+@pytest.mark.parametrize(
+    ("u", "v", "expected"),
+    [(0.0, -5.0, 0.0), (-5.0, 0.0, 90.0), (0.0, 5.0, 180.0), (5.0, 0.0, 270.0)],
+)
+def test_wind_direction_is_meteorological(u: float, v: float, expected: float) -> None:
+    from pvt.extract.points import wind_speed_dir
+
+    df = pl.DataFrame({"u": [u], "v": [v]})
+    speed, direction = wind_speed_dir(pl.col("u"), pl.col("v"))
+    row = df.select(speed.alias("s"), direction.alias("d")).row(0)
+    assert row[0] == pytest.approx(5.0)
+    assert row[1] % 360.0 == pytest.approx(expected)

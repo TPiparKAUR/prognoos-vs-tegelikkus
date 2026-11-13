@@ -30,6 +30,7 @@ ACCEPTED: Final[dict[tuple[str, str], str]] = {
     ("2t", "heightAboveGround"): "temperature",
     ("10u", "heightAboveGround"): "wind",
     ("10v", "heightAboveGround"): "wind",
+    ("10fg", "heightAboveGround"): "wind",
     ("msl", "meanSea"): "pressure",
     ("tp", "surface"): "precipitation",
     ("z", "surface"): "geopotential",

@@ -32,6 +32,7 @@ from urllib3.util.retry import Retry
 
 from pvt import SCHEMA_VERSION
 from pvt.config import ModelConfig, Settings
+from pvt.extract.points import build_weights, derive_points, stencil_points
 from pvt.ingest.ecmwf_grib import BoxExtractor, BoxField, GribContentError, read_box_fields
 from pvt.provenance import ingest_version
 from pvt.schemas import (
@@ -39,9 +40,12 @@ from pvt.schemas import (
     FORECAST_GRID_KEY,
     FORECAST_GRID_STATIC,
     FORECAST_GRID_STATIC_KEY,
+    FORECAST_POINT,
+    FORECAST_POINT_KEY,
     SchemaError,
     validate,
 )
+from pvt.stations import station_targets
 from pvt.storage import (
     ecmwf_grid_path,
     ecmwf_manifest_path,
@@ -62,6 +66,7 @@ STEP_COLUMNS = {
     "10v": "v10_m_s",
     "msl": "mslp_hPa",
     "tp": "precip_acc_mm",
+    "10fg": "gust10m_max_m_s",
 }
 STATIC_COLUMNS = {"z": "grid_orog_m", "lsm": "grid_lsm_frac"}
 TARGET_UNITS = {
@@ -70,6 +75,7 @@ TARGET_UNITS = {
     "v10_m_s": "m_s",
     "mslp_hPa": "hPa",
     "precip_acc_mm": "mm",
+    "gust10m_max_m_s": "m_s",
     "grid_orog_m": "m",
     "grid_lsm_frac": "frac",
 }
@@ -265,6 +271,9 @@ def _check_field(fld: BoxField, issue: dt.datetime) -> None:
                 f"tp step {fld.end_step_h}: expected accumulation from 0, got "
                 f"{fld.step_type} {fld.start_step_h}-{fld.end_step_h}"
             )
+    elif fld.short_name == "10fg":
+        if fld.step_type != "max":
+            raise IngestError(f"10fg step {fld.end_step_h}: expected max, got {fld.step_type}")
     elif fld.step_type != "instant":
         raise IngestError(f"{fld.short_name}: expected instant field, got {fld.step_type}")
 
@@ -308,6 +317,7 @@ def assemble_step_frame(
         gen_ids = set()
         acc_start = 0
         acc_quantum = 0.0
+        gust_start: int | None = None
         for p in params:
             fld = by_key[(step, p)]
             if not (
@@ -327,6 +337,8 @@ def assemble_step_frame(
                 acc_start = fld.start_step_h
                 _, q = convert(fld.quantity, fld.units, np.array([fld.packing_quantum]))
                 acc_quantum = float(q[0])
+            if p == "10fg":
+                gust_start = fld.start_step_h
         if len(gen_ids) != 1:
             raise IngestError(f"step {step}: mixed generatingProcessIdentifier {gen_ids}")
         n = ref.lat_deg.size
@@ -342,9 +354,15 @@ def assemble_step_frame(
                     "member": [-1] * n,
                     "grid_lat_deg": ref.lat_deg,
                     "grid_lon_deg": ref.lon_deg,
-                    **{c: cols[c] for c in STEP_COLUMNS.values() if c in cols},
+                    "t2m_degC": cols["t2m_degC"],
+                    "u10_m_s": cols["u10_m_s"],
+                    "v10_m_s": cols["v10_m_s"],
+                    "mslp_hPa": cols["mslp_hPa"],
+                    "precip_acc_mm": cols["precip_acc_mm"],
                     "precip_acc_start_h": [acc_start] * n,
                     "precip_acc_quantum_mm": [acc_quantum] * n,
+                    "gust10m_max_m_s": cols.get("gust10m_max_m_s", [None] * n),
+                    "gust_window_start_h": [gust_start] * n,
                     "provenance": ["prognoos"] * n,
                     "source_uri": [f"ecmwf-opendata:{relative_key(model, issue, step)}"] * n,
                     "ingest_version": [version] * n,
@@ -498,7 +516,7 @@ def ingest_run(
 
     fetcher = next(f for f in fetchers if f.name == disc.source)
     steps = list(disc.steps_available)
-    params = list(settings.ecmwf.step_params)
+    params = [*settings.ecmwf.step_params, *model.extra_step_params]
     version = ingest_version()
     extractor = BoxExtractor(settings.ecmwf.area)
     t0 = time.monotonic()
@@ -528,6 +546,7 @@ def ingest_run(
         validate(grid_df, FORECAST_GRID, FORECAST_GRID_KEY)
         validate(static_df, FORECAST_GRID_STATIC, FORECAST_GRID_STATIC_KEY)
         _check_accumulation(grid_df)
+        grid_df, static_df, point_df, skipped = reduce_to_stations(settings, grid_df, static_df)
     except (
         SourceUnavailableError,
         IngestError,
@@ -543,7 +562,13 @@ def ingest_run(
 
     gpath = ecmwf_grid_path(settings.data_root, model.model_id, issue, "grid")
     spath = ecmwf_grid_path(settings.data_root, model.model_id, issue, "static")
+    ppath = ecmwf_grid_path(settings.data_root, model.model_id, issue, "point")
     files = {
+        "point": {
+            "path": str(ppath.relative_to(settings.data_root)),
+            "sha256": write_parquet_atomic(point_df, ppath),
+            "rows": point_df.height,
+        },
         "grid": {
             "path": str(gpath.relative_to(settings.data_root)),
             "sha256": write_parquet_atomic(grid_df, gpath),
@@ -563,6 +588,8 @@ def ingest_run(
         "detail": disc.detail,
         "steps_archived": steps,
         "steps_missing": missing,
+        "stations": point_df.get_column("station_id").n_unique(),
+        "stations_skipped_outside_area": skipped,
         "grib_gen_proc_id": sorted(set(grid_df.get_column("grib_gen_proc_id").to_list())),
         "retrieved_at_utc": format_utc(utc_now()),
         "bytes_downloaded": nbytes,
@@ -581,6 +608,36 @@ def ingest_run(
         man["duration_s"],
     )
     return RunResult(model.model_id, format_utc(issue), status, disc.detail, man)
+
+
+def reduce_to_stations(
+    settings: Settings, grid_df: pl.DataFrame, static_df: pl.DataFrame
+) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, list[str]]:
+    """Keep only the stencil grid points around the stations and derive station values.
+
+    Returns
+    -------
+    tuple
+        (stencil grid, stencil static, FORECAST_POINT frame, skipped station ids)
+    """
+    targets = station_targets(settings)
+    if targets.is_empty():
+        raise IngestError("no station targets (config/stations.toml empty?)")
+    weights, skipped = build_weights(static_df, targets, settings.ecmwf.area.grid_increment_deg)
+    if skipped:
+        LOG.warning("stations outside the extraction area: %s", skipped)
+    stencil = stencil_points(weights)
+    on = ["grid_lat_deg", "grid_lon_deg"]
+    grid_st = grid_df.join(stencil, on=on, how="semi")
+    static_st = static_df.join(stencil, on=on, how="semi")
+    points = (
+        derive_points(grid_st, static_st, weights, targets)
+        .select(list(FORECAST_POINT))
+        .cast(FORECAST_POINT)  # type: ignore[arg-type]
+        .sort(["lead_h", "station_id", "interp_method"])
+    )
+    validate(points, FORECAST_POINT, FORECAST_POINT_KEY)
+    return grid_st, static_st, points, skipped
 
 
 def _check_accumulation(df: pl.DataFrame, eps_mm: float = 1e-9) -> None:

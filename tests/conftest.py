@@ -11,7 +11,7 @@ import eccodes
 import numpy as np
 import pytest
 
-from pvt.config import REPO_ROOT, Area, ModelConfig, Settings, load_settings
+from pvt.config import REPO_ROOT, Area, ModelConfig, Settings, Station, load_settings
 from pvt.timeutil import UTC
 
 ISSUE = dt.datetime(2026, 11, 12, 6, tzinfo=UTC)
@@ -25,6 +25,7 @@ LEVELS: dict[str, tuple[str, int | None]] = {
     "2t": ("heightAboveGround", 2),
     "10u": ("heightAboveGround", 10),
     "10v": ("heightAboveGround", 10),
+    "10fg": ("heightAboveGround", 10),
     "msl": ("meanSea", None),
     "tp": ("surface", None),
     "z": ("surface", None),
@@ -40,6 +41,8 @@ def field_value(param: str, step: int, lat: np.ndarray, lon: np.ndarray) -> np.n
         return 3.0 + 0.01 * lon + 0.1 * step
     if param == "10v":
         return -2.0 + 0.01 * lat
+    if param == "10fg":
+        return 8.0 + 0.01 * lat + 0.1 * step
     if param == "msl":
         return 101_000.0 + 10.0 * lat + 5.0 * step
     if param == "tp":
@@ -87,6 +90,9 @@ def write_grib(
             if param == "tp":
                 eccodes.codes_set(h, "stepType", "accum")
                 eccodes.codes_set(h, "startStep", 0)
+            elif param == "10fg":
+                eccodes.codes_set(h, "stepType", "max")
+                eccodes.codes_set(h, "startStep", max(step - 1, 0))
             else:
                 eccodes.codes_set(h, "stepType", "instant")
             eccodes.codes_set(h, "endStep", step)
@@ -154,4 +160,12 @@ def settings(tmp_path: Path) -> Settings:
         )
         for mid, m in s.models.items()
     }
-    return dataclasses.replace(s, ecmwf=ecmwf, models=models)
+    return dataclasses.replace(s, ecmwf=ecmwf, models=models, stations=TEST_STATIONS)
+
+
+#: S1 inland, S2 at sea (nearest land 2 cells east), S3 outside the test area.
+TEST_STATIONS = (
+    Station("S1", "Inland", True, 58.5, 24.25, 20.0, None, "test", "test"),
+    Station("S2", "Seaside", True, 59.3, 21.4, 2.0, None, "test", "test"),
+    Station("S3", "Outside", True, 57.2, 29.5, 5.0, None, "test", "test"),
+)

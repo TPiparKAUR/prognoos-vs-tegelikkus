@@ -46,6 +46,8 @@ FORECAST_GRID: Final[dict[str, pl.DataType]] = {
     "precip_acc_mm": pl.Float64(),
     "precip_acc_start_h": pl.Int16(),
     "precip_acc_quantum_mm": pl.Float64(),
+    "gust10m_max_m_s": pl.Float64(),
+    "gust_window_start_h": pl.Int16(),
     "provenance": pl.String(),
     "source_uri": pl.String(),
     "ingest_version": pl.String(),
@@ -75,34 +77,49 @@ FORECAST_GRID_STATIC: Final[dict[str, pl.DataType]] = {
 }
 FORECAST_GRID_STATIC_KEY: Final = ("model_id", "issue_time_utc", "grid_lat_deg", "grid_lon_deg")
 
-# docs/03 section 3 -- used from stage E2 on.
+# docs/03 section 3, adapted: one row per station x method x step. ``retrieved_at_utc`` is
+# kept in the run manifest (not here) so that re-downloads give byte-identical files.
 FORECAST_POINT: Final[dict[str, pl.DataType]] = {
     "model_id": pl.String(),
     "model_cycle": pl.String(),
+    "grib_gen_proc_id": pl.Int16(),
     "issue_time_utc": UTC_TS,
     "valid_time_utc": UTC_TS,
     "lead_h": pl.Int16(),
     "station_id": pl.String(),
     "member": pl.Int16(),
+    "interp_method": pl.String(),
     "t2m_degC": pl.Float64(),
     "t2m_hcorr_degC": pl.Float64(),
     "u10_m_s": pl.Float64(),
     "v10_m_s": pl.Float64(),
     "wind10m_speed_m_s": pl.Float64(),
     "wind10m_dir_deg": pl.Float64(),
+    "gust10m_max_m_s": pl.Float64(),
+    "gust_window_start_h": pl.Int16(),
     "mslp_hPa": pl.Float64(),
     "precip_acc_mm": pl.Float64(),
+    "precip_acc_start_h": pl.Int16(),
+    "precip_acc_quantum_mm": pl.Float64(),
     "grid_lat_deg": pl.Float64(),
     "grid_lon_deg": pl.Float64(),
+    "grid_dist_km": pl.Float64(),
     "grid_orog_m": pl.Float64(),
     "grid_lsm_frac": pl.Float64(),
-    "interp_method": pl.String(),
+    "station_height_m_EH2000": pl.Float64(),
     "provenance": pl.String(),
     "source_uri": pl.String(),
-    "retrieved_at_utc": UTC_TS,
     "ingest_version": pl.String(),
     "schema_version": pl.String(),
 }
+FORECAST_POINT_KEY: Final = (
+    "model_id",
+    "issue_time_utc",
+    "lead_h",
+    "member",
+    "station_id",
+    "interp_method",
+)
 
 
 class SchemaError(ValueError):

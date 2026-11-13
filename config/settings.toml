@@ -46,3 +46,26 @@ max_age_hours_kliima = 48
 # Window for the run inventory (acceptance criterion 1 in docs/06 section 4).
 inventory_days = 14
 min_completeness_fraction = 0.95
+
+[kliima]
+# KAUR climate dataset API (PostgREST 12; table and column names from its OpenAPI
+# document at the base URL). One request returns at most 20 000 rows -> paging.
+base_url = "https://keskkonnaandmed.envir.ee"
+hourly_table = "f_kliima_tund"
+page_size = 20000
+# Hourly elements (codes from f_kliima_element / Kliimaandmestiku kirjeldus):
+# TA air temperature (degC), PR1H 1-h precipitation sum (mm), WS10M 10-min mean wind
+# speed (m/s), WD10M 10-min prevailing wind direction (deg), WSX1H 1-h max wind (m/s),
+# PA0 sea-level pressure (hPa), RH relative humidity (%).
+elements = ["TA", "PR1H", "WS10M", "WD10M", "WSX1H", "PA0", "RH"]
+# Validated data can be revised; re-fetch this many past days on every run.
+refetch_days = 10
+
+[obs_xml]
+url = "https://www.ilmateenistus.ee/ilma_andmed/xml/observations.php"
+
+[kaur_fc]
+urls = [
+  "https://www.ilmateenistus.ee/ilma_andmed/xml/forecast.php",
+  "https://www.ilmateenistus.ee/ilma_andmed/xml/forecast.php?lang=eng",
+]

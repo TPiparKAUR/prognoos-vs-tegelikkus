@@ -32,10 +32,10 @@ class MonitorOutcome:
 
 
 def _load_manifests(root: Path, model_id: str) -> dict[str, dict[str, Any]]:
-    base = root / "manifests" / "ecmwf_opendata" / f"model={model_id}"
+    base = root / "ecmwf"
     out: dict[str, dict[str, Any]] = {}
     if base.exists():
-        for p in sorted(base.rglob("*.json")):
+        for p in sorted(base.rglob(f"{model_id}_*.json")):
             m = read_json(p)
             out[m["issue_time_utc"]] = m
     return out

@@ -72,40 +72,30 @@ def read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def ecmwf_grid_path(data_root: Path, model_id: str, issue_time: dt.datetime, kind: str) -> Path:
-    """Archive path of one run (ADR-009 partitioning ``source/model/year/month``).
+#: Datasets persisted under ``<data_root>/<dataset>/YYYY/MM/DD/`` (one bundle per day).
+DAY_DATASETS = ("ecmwf", "obs_xml", "kaur_fc", "kliima")
 
-    Parameters
-    ----------
-    data_root : pathlib.Path
-        Root of the data archive.
-    model_id : str
-        ``ifs`` or ``aifs-single``.
-    issue_time : datetime.datetime
-        Run start (aware).
-    kind : str
-        ``grid`` (per-step fields) or ``static`` (orography, land-sea mask).
+
+def day_dir(data_root: Path, dataset: str, day: dt.date) -> Path:
+    """Directory of one dataset-day, e.g. ``data/ecmwf/2026/11/12``."""
+    if dataset not in DAY_DATASETS:
+        raise ValueError(f"unknown dataset {dataset!r}")
+    return data_root / dataset / f"{day:%Y}" / f"{day:%m}" / f"{day:%d}"
+
+
+def ecmwf_grid_path(data_root: Path, model_id: str, issue_time: dt.datetime, kind: str) -> Path:
+    """Return the archive file of one run.
+
+    ``kind`` is ``grid`` (stencil grid points), ``point`` (station values) or ``static``
+    (orography, land-sea mask).
     """
     t = require_utc(issue_time)
-    return (
-        data_root
-        / f"forecast_{kind}"
-        / "source=ecmwf_opendata"
-        / f"model={model_id}"
-        / f"year={t:%Y}"
-        / f"month={t:%m}"
-        / f"{model_id}_{run_tag(t)}_{kind}.parquet"
-    )
+    if kind not in ("grid", "point", "static"):
+        raise ValueError(f"unknown kind {kind!r}")
+    return day_dir(data_root, "ecmwf", t.date()) / f"{model_id}_{run_tag(t)}_{kind}.parquet"
 
 
 def ecmwf_manifest_path(data_root: Path, model_id: str, issue_time: dt.datetime) -> Path:
-    """Path of the per-run manifest (status, steps, hashes, retrieval metadata)."""
+    """Per-run manifest (status, steps, hashes, retrieval metadata), next to the data."""
     t = require_utc(issue_time)
-    return (
-        data_root
-        / "manifests"
-        / "ecmwf_opendata"
-        / f"model={model_id}"
-        / f"year={t:%Y}"
-        / f"{model_id}_{run_tag(t)}.json"
-    )
+    return day_dir(data_root, "ecmwf", t.date()) / f"{model_id}_{run_tag(t)}.json"
