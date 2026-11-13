@@ -1,0 +1,66 @@
+# Schedules fire only on the default branch: main (ADR-010).
+# Static web page (stage E4): pairs + scores from the archive, JSON export, Vite build,
+# GitHub Pages deploy. Requires Settings -> Pages -> Source: "GitHub Actions" (one-time,
+# repository owner). Runs twice a day after the climate-data ingest (05:41 / 17:41 UTC)
+# and on pushes to main that touch the page or the scoring code.
+name: site
+on:
+  schedule:
+    - cron: "23 7,19 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "src/pvt/pair.py"
+      - "src/pvt/score.py"
+      - "src/pvt/verify/**"
+      - "src/pvt/site/**"
+      - ".github/workflows/site.yml"
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PVT_DATA_ROOT: ${{ github.workspace }}/data
+      PVT_INGEST_VERSION: ${{ github.sha }}
+      # Valid-time window shown on the page (days of archive restored from Releases).
+      WINDOW_DAYS: "45"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: uv run python ci/github_release_sync.py pull --data-root "$PVT_DATA_ROOT" --dataset ecmwf --dataset kliima --dataset obs_xml --days "$WINDOW_DAYS"
+      - id: monitor
+        run: uv run pvt monitor
+        continue-on-error: true # data status is shown on the page; staleness alerts come from monitor.yml
+      - run: uv run pvt pair
+      - run: uv run pvt score
+      - run: uv run pvt build-site --out site/public/data
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - working-directory: site
+        run: npm ci --no-audit --no-fund && npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -109,7 +109,7 @@ def test_inventory_lists_missing_runs_with_reason(settings: Settings) -> None:
 
 @pytest.mark.parametrize(
     "step",
-    ["pair", "score", "mos", "build-site"],
+    ["mos"],
 )
 def test_pending_steps_exit_with_usage_code(step: str) -> None:
     assert main([step]) == EXIT_USAGE

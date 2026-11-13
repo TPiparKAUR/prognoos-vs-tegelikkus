@@ -104,3 +104,14 @@ uv run pytest -m network           # 1 samm päris ECMWF peeglist (vajab võrku)
 | Keskkonnaagentuur, vaatluste XML <https://www.ilmateenistus.ee/ilma_andmed/xml/observations.php> | T1 tõde | viide Keskkonnaagentuurile + link <https://www.ilmateenistus.ee> |
 | Keskkonnaagentuur, „Eesti prognoos" XML <https://www.ilmateenistus.ee/ilma_andmed/xml/forecast.php> | KAURi prognoos (sisevaade, ADR-012) | viide Keskkonnaagentuurile + link |
 | Keskkonnaagentuur, kliimaandmestik (CLIDATA) API <https://keskkonnaandmed.envir.ee/f_kliima_tund>, jaamad `f_kliima_jaam_vaatlus` | T2 tõde, jaamaregister | CC BY 4.0 |
+
+## Veebileht (E4)
+
+```bash
+uv run pvt pair && uv run pvt score && uv run pvt build-site --out site/public/data
+cd site && npm ci && npm run dev
+```
+
+GitHub Pages ehitatakse töövoos `.github/workflows/site.yml` (Settings → Pages → Source: GitHub Actions).
+Aluskaart `site/public/basemap/estonia.geojson` on genereeritud skriptiga `site/scripts/build-basemap.mjs`
+(© OpenStreetMap contributors, ODbL).

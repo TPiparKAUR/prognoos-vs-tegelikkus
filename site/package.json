@@ -1,0 +1,25 @@
+{
+  "name": "prognoos-vs-tegelikkus-site",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Static web page of the experimental project 'Prognoos vs tegelikkus' (docs/05).",
+  "license": "UNLICENSED",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "basemap": "node scripts/build-basemap.mjs"
+  },
+  "dependencies": {
+    "echarts": "6.1.0",
+    "maplibre-gl": "6.16.0"
+  },
+  "devDependencies": {
+    "@turf/bbox-clip": "7.4.0",
+    "@turf/simplify": "7.4.0",
+    "typescript": "6.0.3",
+    "vite": "8.3.5"
+  }
+}

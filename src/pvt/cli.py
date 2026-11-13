@@ -24,10 +24,7 @@ EXIT_OK, EXIT_PROBLEM, EXIT_USAGE, EXIT_CONFIG = 0, 1, 2, 3
 
 # Steps defined in docs/08 that later stages implement.
 _PENDING_STEPS = {
-    "pair": "E2",
-    "score": "E3",
     "mos": "E5",
-    "build-site": "E4",
 }
 
 
@@ -113,6 +110,31 @@ def _cmd_monitor(settings: Settings, args: argparse.Namespace) -> int:
     return run_monitor(settings).exit_code
 
 
+def _cmd_pair(settings: Settings, args: argparse.Namespace) -> int:
+    from pvt.pair import run_pair
+
+    result = run_pair(settings.data_root)
+    return EXIT_OK if result.n_hourly else EXIT_PROBLEM
+
+
+def _cmd_score(settings: Settings, args: argparse.Namespace) -> int:
+    from pvt.score import run_score
+
+    try:
+        run_score(settings.data_root)
+    except FileNotFoundError as exc:
+        LOG.error("score: pairs missing (run `pvt pair` first): %s", exc)
+        return EXIT_PROBLEM
+    return EXIT_OK
+
+
+def _cmd_build_site(settings: Settings, args: argparse.Namespace) -> int:
+    from pvt.site.build import build_site
+
+    build_site(settings, args.out)
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Return the argument parser."""
     p = argparse.ArgumentParser(prog="pvt", description="Prognoos vs tegelikkus pipeline")
@@ -146,6 +168,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     ):
         sub.add_parser(name, help=help_text).set_defaults(func=func)
+
+    sub.add_parser("pair", help="forecast-observation pairs from the archive (E2)").set_defaults(
+        func=_cmd_pair
+    )
+    sub.add_parser("score", help="verification scores from the pairs (E3)").set_defaults(
+        func=_cmd_score
+    )
+    b = sub.add_parser("build-site", help="JSON data for the static web page (E4)")
+    b.add_argument("--out", type=Path, default=Path("site/public/data"), help="output directory")
+    b.set_defaults(func=_cmd_build_site)
 
     m = sub.add_parser("monitor", help="freshness and run inventory; exit 1 if stale")
     m.set_defaults(func=_cmd_monitor)

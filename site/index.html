@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="et">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="Eksperimentaalne, mitteametlik võrdlus: ECMWF IFS ja AIFS prognoosid vs KAURi jaamade mõõtmised."
+    />
+    <title>Prognoos vs tegelikkus</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cpath d='M7 21l6-7 5 4 7-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <script>
+      // Apply the stored theme before first paint (no flash). Storage may be unavailable.
+      try {
+        const t = localStorage.getItem("pvt-theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Liigu sisu juurde</a>
+    <header class="topbar">
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="8" />
+          <path d="M7 21l6-7 5 4 7-9" />
+        </svg>
+        <div>
+          <h1>Prognoos vs tegelikkus</h1>
+          <p class="sub">ECMWF IFS ja AIFS Single KAURi jaamades</p>
+        </div>
+      </div>
+      <p class="badge" role="note">Eksperimentaalne, mitteametlik</p>
+      <div class="top-actions">
+        <span id="freshness" class="pill" aria-live="polite">Laen andmeid…</span>
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="Vaheta teemat">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z" /></svg>
+        </button>
+      </div>
+    </header>
+
+    <nav class="filters" aria-label="Filtrid">
+      <div class="seg" role="radiogroup" aria-label="Muutuja" id="f-variable"></div>
+      <div class="seg" role="radiogroup" aria-label="Näitaja" id="f-metric"></div>
+      <div class="seg" role="radiogroup" aria-label="Etteanne" id="f-bucket"></div>
+      <label class="sel">
+        <span>Tõde</span>
+        <select id="f-truth"></select>
+      </label>
+      <label class="sel">
+        <span>Interpolatsioon</span>
+        <select id="f-method"></select>
+      </label>
+    </nav>
+
+    <main id="main">
+      <section class="kpis" id="kpis" aria-label="Kokkuvõte"></section>
+
+      <div class="grid">
+        <section class="card map-card" aria-labelledby="map-title">
+          <header class="card-head">
+            <div>
+              <h2 id="map-title">Jaamade kaart</h2>
+              <p class="hint" id="map-hint"></p>
+            </div>
+            <div class="card-tools">
+              <div class="seg small" role="radiogroup" aria-label="Kaardi mudel" id="f-mapmodel"></div>
+              <button class="ghost" type="button" data-table-toggle="map">Tabel</button>
+            </div>
+          </header>
+          <div class="map-wrap">
+            <div id="map" role="region" aria-label="Kaart jaamadega; sama info on tabelis"></div>
+            <div class="legend" id="map-legend"></div>
+          </div>
+          <div class="table-view" id="map-table" hidden></div>
+        </section>
+
+        <section class="card station-card" id="station" aria-labelledby="station-title">
+          <header class="card-head">
+            <div>
+              <h2 id="station-title">Vali jaam</h2>
+              <p class="hint" id="station-meta">Klõpsa kaardil jaamale või vali tabelist.</p>
+            </div>
+            <div class="card-tools">
+              <div class="seg small" role="radiogroup" aria-label="Jaama muutuja" id="f-stationvar"></div>
+            </div>
+          </header>
+          <div class="chart" id="station-chart"></div>
+          <p class="hint" id="station-foot"></p>
+        </section>
+
+        <section class="card wide" aria-labelledby="lead-title">
+          <header class="card-head">
+            <div>
+              <h2 id="lead-title">Täpsus etteande järgi</h2>
+              <p class="hint" id="lead-hint"></p>
+            </div>
+            <div class="card-tools">
+              <button class="ghost" type="button" data-table-toggle="lead">Tabel</button>
+            </div>
+          </header>
+          <div class="chart tall" id="lead-chart"></div>
+          <div class="table-view" id="lead-table" hidden></div>
+        </section>
+
+        <section class="card" aria-labelledby="sc-title">
+          <header class="card-head">
+            <div>
+              <h2 id="sc-title">Scorecard: IFS vs AIFS</h2>
+              <p class="hint">MAE suhteline erinevus ühisel valimil. Sinine = IFS väiksema veaga, punane = AIFS.</p>
+            </div>
+          </header>
+          <div id="scorecard"></div>
+        </section>
+
+        <section class="card" aria-labelledby="pr-title">
+          <header class="card-head">
+            <div>
+              <h2 id="pr-title">24 h sademed</h2>
+              <p class="hint" id="precip-hint"></p>
+            </div>
+            <div class="card-tools">
+              <div class="seg small" role="radiogroup" aria-label="Ööpäeva piir" id="f-window"></div>
+            </div>
+          </header>
+          <div id="precip"></div>
+        </section>
+
+        <section class="card wide" aria-labelledby="status-title">
+          <header class="card-head">
+            <div>
+              <h2 id="status-title">Andmete seis ja metoodika</h2>
+            </div>
+          </header>
+          <div id="status" class="status"></div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="foot">
+      <p>
+        Eksperimentaalne, mitteametlik. Ei asenda KAURi ametlikku prognoosi ega hoiatusi.
+        Ametlik ilmateenistus: <a href="https://www.ilmateenistus.ee">ilmateenistus.ee</a>.
+      </p>
+      <p id="attribution"></p>
+    </footer>
+    <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
