@@ -1,4 +1,4 @@
-# Schedules fire only on the default branch (main, ADR-010).
+# Schedules fire only on the default branch: main (ADR-010, switched 2026-11-13).
 # GitHub disables scheduled workflows in public repositories after 60 days without
 # repository activity. A monthly commit to status/heartbeat.json prevents that (docs/03 section 5).
 name: keepalive

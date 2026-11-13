@@ -1,4 +1,4 @@
-# Schedules fire only on the default branch (main, ADR-010).
+# Schedules fire only on the default branch: main (ADR-010, switched 2026-11-13).
 # ECMWF IFS + AIFS Single station extracts, every 2 h at :17 UTC (docs/03 §4).
 # Archive: GitHub Releases archive-YYYY-MM, one tar per dataset-day (ci/github_release_sync.py).
 name: ingest-ecmwf
