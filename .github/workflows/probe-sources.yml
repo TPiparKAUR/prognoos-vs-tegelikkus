@@ -1,0 +1,57 @@
+# One-off probes from a GitHub runner (the development sandbox cannot reach these hosts):
+# candidate free regional forecast APIs for Estonia (owner request 2026-11-13). Prints status,
+# headers and the start of each body; the full bodies are kept as an artifact.
+name: probe-sources
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - shell: bash
+        run: |
+          mkdir -p probe
+          uv run python - <<'PY'
+          import re, time
+          from pathlib import Path
+          from pvt.ingest.http import session
+          lat, lon = 59.398122, 24.60287  # Tallinn-Harku (KAUR climate station AJHARK01)
+          urls = {
+              "fmi_storedqueries": "https://opendata.fmi.fi/wfs?service=WFS&version=2.0.0&request=describeStoredQueries",
+              "metno_locationforecast": f"https://api.met.no/weatherapi/locationforecast/2.0/complete?lat={lat:.4f}&lon={lon:.4f}",
+              "smhi_pmp3g": f"https://opendata-download-metfcst.smhi.se/api/category/pmp3g/version/2/geotype/point/lon/{lon:.4f}/lat/{lat:.4f}/data.json",
+              "openmeteo_models": f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m&forecast_days=1&models=icon_eu,metno_nordic,dmi_harmonie_arome_europe,knmi_harmonie_arome_europe,ecmwf_ifs025,gfs_global,meteofrance_arpege_europe",
+              "openmeteo_previous_runs": f"https://previous-runs-api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,temperature_2m_previous_day1&past_days=3&forecast_days=1&models=icon_eu",
+              "dwd_iconeu_listing": "https://opendata.dwd.de/weather/nwp/icon-eu/grib/00/t_2m/",
+          }
+          s = session(retries=1)
+          for name, url in urls.items():
+              print(f"=== {name}: {url}")
+              try:
+                  r = s.get(url, timeout=60)
+              except Exception as exc:  # noqa: BLE001 - probe: report any failure
+                  print("ERROR", type(exc).__name__, exc)
+                  continue
+              print("status", r.status_code)
+              for k in ("content-type", "content-length", "server", "expires", "last-modified", "date"):
+                  print(f"  {k}: {r.headers.get(k)}")
+              Path(f"probe/{name}.body").write_bytes(r.content)
+              print("body bytes", len(r.content))
+              if name == "fmi_storedqueries":
+                  ids = sorted(set(re.findall(r'StoredQueryDescription id="([^"]+)"', r.text)))
+                  print("forecast stored queries:", [i for i in ids if "forecast" in i])
+              else:
+                  print(r.text[:3500 if name != "dwd_iconeu_listing" else 1200])
+              time.sleep(2)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-probe
+          path: probe/
+          retention-days: 7
