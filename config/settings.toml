@@ -26,7 +26,7 @@ retry_after_seconds = 20
 http_timeout_seconds = 60
 # One invocation must finish well inside the CI job limit (GitHub job: 110 min), otherwise
 # the archive upload step would not run. Runs are processed newest first.
-max_runs_per_invocation = 12
+max_runs_per_invocation = 40
 max_minutes_per_invocation = 75
 # Pause between index HEAD probes (seconds) to stay below mirror rate limits.
 probe_pause_seconds = 0.05

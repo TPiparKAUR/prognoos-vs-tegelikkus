@@ -60,7 +60,13 @@ Päris andmetel: ECMWF IFS + AIFS 2026-11-12 12Z; kliima-API 2026-11-11…13.
 - `ingest-kaur`: prognoosi-XML õnnestus kohe; vaatluste XML kukkus kahel esimesel käivitusel
   (G9, G10), parandatud – kolmas käivitus õnnestus, arhiiv `obs_xml_2026-11-13.tar` ja
   `meta.tar` Release'is.
-- `ingest-ecmwf`: esimene käsitsi käivitus (kuni 12 jooksu) oli aruande kirjutamise ajal pooleli.
+- `ingest-ecmwf`: esimene käsitsi käivitus õnnestus (17 min): 12 jooksu (IFS 00Z: 85 sammu,
+  280 MB, 122 s; AIFS: 61 sammu, 142 MB, ~60 s; Google-peegel), Release'is
+  `ecmwf_2026-11-11/12/13.tar`; 18 jooksu jäi limiidi tõttu järgmisele käivitusele →
+  limiit tõstetud 40-le (75 min ajapiir jääb kaitseks).
+- **Ajastatud käivitusi (cron) ei olnud 09:30 UTC seisuga ühelgi töövool**, kuigi töövood on
+  olekus „active" ja vaikeharul. Jälgin; kui need ei käivitu, tuleb repo Actions-seadetes
+  kontrollida, kas ajastatud töövood on lubatud.
 
 ## Avatud küsimused
 1. **Asukohaprognoos** (ADR-017, sinu peamine soov): vajan andmepäringu URL-i. Kas lubad
