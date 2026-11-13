@@ -333,3 +333,19 @@ def test_invocation_cap_takes_newest_first(settings: Settings) -> None:
         settings, ["ifs", "aifs-single"], start=start, end=ISSUE, now=NOW, fetchers=[f], max_runs=10
     )
     assert sorted(r.issue_time_utc for r in rest) == ["2026-11-12T00:00:00Z"] * 2
+
+
+def test_ifs_0p1_uses_split_sfc_files_and_own_grid() -> None:
+    from pvt.config import REPO_ROOT, load_settings
+    from pvt.ingest.ecmwf import model_area
+
+    real = load_settings(REPO_ROOT / "config")
+    m = real.models["ifs-0p1"]
+    key = relative_key(m, ISSUE, 24, "index")
+    assert key.endswith("/ifs/0p1/oper/20261112060000-24h-oper-fc-sfc.index")
+    area = model_area(real, m)
+    assert area.grid_increment_deg == 0.1
+    # bounds are multiples of the 0.1 deg increment (box size check in BoxExtractor)
+    for v in (area.lat_min_deg, area.lat_max_deg, area.lon_min_deg, area.lon_max_deg):
+        assert abs(v * 10 - round(v * 10)) < 1e-9
+    assert model_area(real, real.models["ifs"]).grid_increment_deg == 0.25

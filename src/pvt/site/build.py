@@ -58,16 +58,10 @@ MODEL_LABELS: Final = {
     "ifs": "ECMWF IFS (0,25°)",
     "aifs-single": "ECMWF AIFS Single (0,25°)",
     "persistence": "Persistents (vaatlus 24 h tagasi)",
-    "kaur_asukoht": "KAURi asukohaprognoos",
+    "ifs-0p1": "ECMWF IFS 9 km (KAURi asukohaprognoosi alus)",
 }
 # Sources that are planned but not yet archived (shown as "waiting" on the page).
-PENDING_MODELS: Final = {
-    "kaur_asukoht": (
-        "ilmmicroservice.envir.ee lükkab automaatsed päringud tagasi (ühendus suletakse "
-        "vastuseta, nii arenduskeskkonnast kui GitHubist, 13.11.2026). Vajalik KAURi IT "
-        "lubatud ligipääs; seejärel salvestatakse prognoos igal jooksul jaamade kohal."
-    )
-}
+PENDING_MODELS: Final[dict[str, str]] = {}
 METHOD_LABELS: Final = {
     "nearest_land": "Lähim maapunkt",
     "bilinear": "Bilineaarne",
@@ -373,6 +367,10 @@ def build_site(settings: Settings, out_dir: Path, now: dt.datetime | None = None
             "Eksperimentaalne, mitteametlik. Ei asenda KAURi ametlikku prognoosi ega hoiatusi.",
             "Mudelite võrdlus ühisel valimil: samad jooksud, etteanded, jaamad ja tunnid.",
             "Usaldusvahemikku näidatakse alates 10 valiidsuspäevast (plokk-bootstrap).",
+            "IFS 9 km = KAURi asukohaprognoosi alus: sama mudel (ECMWF IFS ~9 km) ja sama "
+            "meetod (lähim ruudupunkt), mida KAURi asukohaprognoosi leht kirjeldab; taastatud "
+            "ECMWF avaandmetest (0,1°), mitte KAURi serverist. KAURi lehe väärtustega "
+            "kokkulangevust ei ole veel kontrollitud.",
             "XML-jaamad (kõrgus teadmata) on skoorides ainult T1-ga ja temperatuur ilma "
             "kõrguskorrektsioonita (ADR-019).",
         ],
@@ -383,8 +381,8 @@ def build_site(settings: Settings, out_dir: Path, now: dt.datetime | None = None
     if tables["station"].height:
         tables["station"] = (
             tables["station"]
-            .filter(pl.col("sample") == "common")
-            .drop("sample", "n_stations", "unit")
+            .filter(pl.col("sample").is_in(["common", "common9"]))
+            .drop("n_stations", "unit")
         )
     for name, df in tables.items():
         _write(out_dir / f"scores_{name}.json", columnar(df) if df.height else {})

@@ -75,7 +75,7 @@ Formaat: kontekst · alternatiivid · poolt/vastu · valik · tagajärjed · all
 - Jaamaväärtused (bilineaarne, lähim, lähim maapunkt; kõrguskorrektsioon; tuule kiirus/suund) on deterministlik funktsioon arhiivist: `pvt.extract.points.load_points()`. Neid ei salvestata eraldi, sest punktifail oli mõõtmisel 2,5× suurem kui toorandmed.
 - Jaamad: 25 kliimajaama (kinnitatud) + vaatluste XML-i lisajaamad (kinnitamata, skooridesse ei lähe).
 
-**ADR-017 KAURi asukohaprognoos (ilmateenistus.ee „asukoha-prognoos") on peamine KAURi võrdlusprognoos** (staatus: blokeeritud – teenus keeldub automaatsetest päringutest)
+**ADR-017 KAURi asukohaprognoos (ilmateenistus.ee „asukoha-prognoos") on peamine KAURi võrdlusprognoos** (staatus: KAURi teenus keeldub automaatsetest päringutest; sisu alus taastatakse ECMWF avaandmetest, ADR-021)
 - Kontekst: tellija soovib eelkõige valideerida asukohapõhist prognoosi (tunnipõhine temperatuur, rõhk, tuul, sademed, nähtus). Leht kuvab Highchartsi meteogrammi, mille andmed laaditakse JavaScriptiga.
 - Fakt (2026-11-13, asukohaprognoosi lehe HTML, muutuja `_var["meteogramDataUri"]`): leht laeb andmed JSONP-päringuga `https://ilmmicroservice.envir.ee/api/forecasts/modelForecastByLocation?locationId=<id>&lang=et&coordinates=<lat>;<lon>&showWarnings=1` (`meteogram_loader.js`: `$.getJSON(uri + '&callback=?')`). Tellija lubas teenust selle projekti jaoks pärida.
 - Fakt (13.11.2026): `ilmmicroservice.envir.ee` sulgeb ühenduse vastuseta nii arenduskeskkonnast kui GitHubi runnerilt (töövoog `probe-location-fc`, ka täpselt lehe JSONP-kujul `&callback=`). Brauseri päiseid ega küpsiseid ei jäljendata.
@@ -97,3 +97,17 @@ Formaat: kontekst · alternatiivid · poolt/vastu · valik · tagajärjed · all
 
 **ADR-020 Varuajasti** (staatus: tellija kinnitas 2026-11-13)
 - Fakt: GitHub ei käivitanud selle repo `schedule`-sündmusi kordagi (vana ja uue vaikeharu peal). Töövoog `scheduler.yml` käivitab ingesti ise (`workflow_dispatch`): XML iga 10 min, ECMWF iga 2 h, kliima ja leht 2× ööpäevas; jookseb ~5,8 h ja käivitab end uuesti. Peatamine: töövoo keelamine. Tavalised cron'id jäävad alles.
+
+**ADR-021 KAURi asukohaprognoosi alus = ECMWF IFS 9 km avaandmetest** (staatus: teostatud 2026-11-13)
+- Fakt (asukohaprognoosi leht, 13.11.2026): „Asukohapõhine prognoos baseerub ECMWF … (ECMWF IFS) andmetel … ruudu küljepikkuseks on meie laiustel ~9 km … interpoleeritakse lähima ruudu mudelprognoosid … Mudeli väljund uueneb [talveajal] kell 5:30, 11:30, 17:30, 23:30."
+- Fakt (ECMWF avaandmed, 13.11.2026): IFS 0,1° on olemas (`ifs/0p1/oper`, failid `-sfc`/`-pl`, ka Google'i ja AWS-i peeglis), sammud samad mis 0,25° puhul; `z` ja `lsm` sammul 0.
+- Valik: mudel `ifs-0p1` (sama ingest, oma ala 57,2–60,3° N × 21,0–28,8° E, 0,1° samm; 2528 punkti). Lehel „IFS 9 km (KAURi asukohaprognoosi alus)"; KAURi lehe meetodile vastab interpolatsioon „Lähim ruudupunkt".
+- Piirang (Tõlgendus): see on sama mudel ja meetod, mitte KAURi serveri väärtused. KAUR võib kasutada ECMWF-i liikmesriigi levitust (natiivne ruudustik, varasem kättesaadavus) ja lisatöötlust. Kokkulangevust tuleb kontrollida mõne KAURi lehelt käsitsi salvestatud näidisega.
+- Maht (mõõdetud 2 sammu: 28,9 MB): ~1,2 GB 00/12 jooksu ja ~0,7 GB 06/18 jooksu kohta → ~3,8 GB allalaadimist ööpäevas; arhiivi jääb ainult jaamade ümbrus.
+
+**ADR-022 Täiendavad tasuta prognoosiallikad (kandidaadid)** (staatus: ettepanek; kontrollitud GitHubi runnerilt 13.11.2026)
+- FMI avaandmed (CC BY 4.0, WFS): `fmi::forecast::meps::surface::point::*` (MEPS/HARMONIE), `fmi::forecast::edited::weather::scandinavia::point::*` (FMI sünoptikute toimetatud prognoos), `ecmwf::forecast::surface::point::*`. Eesti katvus: kontrollimisel.
+- MET Norway Locationforecast 2.0 (api.met.no): Tallinn-Harku punkt vastas tunniandmetega; tingimused nõuavad User-Agentis rakenduse nime ja kontakti (kasutame repo URL-i, mitte isikuandmeid); ainult viimane prognoos → tuleb ise arhiveerida.
+- Open-Meteo: 7 mudelit (ICON-EU, MET Nordic, DMI HARMONIE, KNMI HARMONIE, ECMWF IFS 0,25, GFS, ARPEGE) ja Previous Runs API (ajalugu alates 2024) – kõik vastasid. **Tasuta API ainult mittekaubanduslikuks kasutuseks** (andmed CC BY 4.0) – KAURi kasutus vajab otsust/kinnitust.
+- DWD ICON-EU GRIB (opendata.dwd.de, CC BY 4.0): kättesaadav, suur maht.
+- SMHI pmp3g: 404 (lõpp-punkt või ala) – ei kasuta.

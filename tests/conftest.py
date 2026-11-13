@@ -163,6 +163,7 @@ def settings(tmp_path: Path) -> Settings:
             m,
             candidate_steps=TEST_STEPS,
             expected_steps=dict.fromkeys(m.runs_utc, TEST_STEPS),
+            area=None,  # every model on the 1-degree test grid
         )
         for mid, m in s.models.items()
     }

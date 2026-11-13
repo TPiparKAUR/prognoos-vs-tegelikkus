@@ -1,7 +1,7 @@
 // Application state, mirrored to the URL hash so every view is a shareable link.
 // Unknown or unavailable values in a link fall back to defaults (sanitize() in main.ts).
 
-export type MapMode = "better" | "ifs" | "aifs-single";
+export type MapMode = "better" | "ifs" | "aifs-single" | "ifs-0p1";
 export type StationVar = "t2m" | "wind" | "mslp" | "precip";
 
 export interface State {

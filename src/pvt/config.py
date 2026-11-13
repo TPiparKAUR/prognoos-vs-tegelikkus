@@ -54,6 +54,8 @@ class ModelConfig:
     min_issue_time: dt.datetime
     cycles: tuple[ModelCycle, ...]
     extra_step_params: tuple[str, ...] = ()
+    # Regional box + grid increment of this model's grid (None: settings.ecmwf.area).
+    area: Area | None = None
 
     def cycle_for(self, issue_time: dt.datetime) -> str:
         """Return the model cycle label for a run, or ``"unknown"``."""
@@ -184,6 +186,7 @@ def _parse_models(params: dict[str, Any]) -> dict[str, ModelConfig]:
             min_issue_time=parse_utc(m["min_issue_time_utc"]),
             cycles=cycles,
             extra_step_params=tuple(m.get("extra_step_params", [])),
+            area=Area(**{k: float(v) for k, v in m["area"].items()}) if "area" in m else None,
         )
     return models
 

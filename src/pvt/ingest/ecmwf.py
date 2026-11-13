@@ -31,7 +31,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from pvt import SCHEMA_VERSION
-from pvt.config import ModelConfig, Settings
+from pvt.config import Area, ModelConfig, Settings
 from pvt.extract.points import (
     attach_targets,
     build_weights,
@@ -124,10 +124,22 @@ def relative_key(model: ModelConfig, issue: dt.datetime, step: int, ext: str = "
     Valid for runs from 2026-05-12 on, when 06/18 UTC runs moved to ``stream=oper``.
     """
     t = require_utc(issue)
+    # 0.1 deg IFS ships single-level fields in "<name>-sfc" files (ecmwf-opendata
+    # SPLIT_RESOLUTIONS); only surface fields are archived here.
+    split = "-sfc" if model.resol in SPLIT_RESOLUTIONS else ""
     return (
         f"{t:%Y%m%d}/{t:%H}z/{model.client_model}/{model.resol}/{model.stream}/"
-        f"{t:%Y%m%d%H%M%S}-{step}h-{model.stream}-{model.type}.{ext}"
+        f"{t:%Y%m%d%H%M%S}-{step}h-{model.stream}-{model.type}{split}.{ext}"
     )
+
+
+#: Resolutions whose open-data files are split into "-sfc" and "-pl" (observed 2026-11-13).
+SPLIT_RESOLUTIONS = frozenset({"0p1"})
+
+
+def model_area(settings: Settings, model: ModelConfig) -> Area:
+    """Regional box of a model (its own grid increment for the 0.1 deg IFS)."""
+    return model.area or settings.ecmwf.area
 
 
 @dataclass
@@ -156,15 +168,16 @@ class OpenDataFetcher:
     def _client(self, model: ModelConfig) -> Any:
         from ecmwf.opendata import Client
 
-        if model.client_model not in self._clients:
-            self._clients[model.client_model] = Client(
+        key = f"{model.client_model}/{model.resol}"
+        if key not in self._clients:
+            self._clients[key] = Client(
                 source=self.name,
                 model=model.client_model,
                 resol=model.resol,
                 maximum_retries=self.maximum_retries,
                 retry_after=self.retry_after_seconds,
             )
-        return self._clients[model.client_model]
+        return self._clients[key]
 
     def has_step(self, model: ModelConfig, issue: dt.datetime, step: int) -> bool:
         """Probe ``<step>.index`` with HEAD."""
@@ -530,7 +543,7 @@ def ingest_run(
     steps = list(disc.steps_available)
     params = [*settings.ecmwf.step_params, *model.extra_step_params]
     version = ingest_version()
-    extractor = BoxExtractor(settings.ecmwf.area)
+    extractor = BoxExtractor(model_area(settings, model))
     t0 = time.monotonic()
     nbytes = 0
     frames: list[pl.DataFrame] = []
@@ -563,7 +576,7 @@ def ingest_run(
         validate(static_df, FORECAST_GRID_STATIC, FORECAST_GRID_STATIC_KEY)
         _check_accumulation(grid_df)
         grid_df, static_df, weights_df, point_df, skipped = reduce_to_stations(
-            settings, grid_df, static_df
+            settings, grid_df, static_df, model_area(settings, model).grid_increment_deg
         )
     except (
         SourceUnavailableError,
@@ -639,7 +652,10 @@ def ingest_run(
 
 
 def reduce_to_stations(
-    settings: Settings, grid_df: pl.DataFrame, static_df: pl.DataFrame
+    settings: Settings,
+    grid_df: pl.DataFrame,
+    static_df: pl.DataFrame,
+    grid_increment_deg: float | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame, list[str]]:
     """Keep only the stencil grid points around the stations.
 
@@ -655,7 +671,8 @@ def reduce_to_stations(
     targets = station_targets(settings)
     if targets.is_empty():
         raise IngestError("no station targets (config/stations.toml empty?)")
-    weights, skipped = build_weights(static_df, targets, settings.ecmwf.area.grid_increment_deg)
+    inc = grid_increment_deg or settings.ecmwf.area.grid_increment_deg
+    weights, skipped = build_weights(static_df, targets, inc)
     if skipped:
         LOG.warning("stations outside the extraction area: %s", skipped)
     stencil = stencil_points(weights)

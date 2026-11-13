@@ -21,7 +21,7 @@ def _archive(settings: Settings, issues: list[dt.datetime]) -> None:
     for issue in issues:
         ingest(
             settings,
-            ["ifs", "aifs-single"],
+            list(settings.models),
             start=issue,
             end=issue,
             now=issue + dt.timedelta(hours=20),

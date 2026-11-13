@@ -21,13 +21,12 @@ jobs:
           from pathlib import Path
           from pvt.ingest.http import session
           lat, lon = 59.398122, 24.60287  # Tallinn-Harku (KAUR climate station AJHARK01)
+          fmi = "https://opendata.fmi.fi/wfs?service=WFS&version=2.0.0&request=getFeature&storedquery_id="
+          q = f"&latlon={lat},{lon}&parameters=temperature,windspeedms,pressure"
           urls = {
-              "fmi_storedqueries": "https://opendata.fmi.fi/wfs?service=WFS&version=2.0.0&request=describeStoredQueries",
-              "metno_locationforecast": f"https://api.met.no/weatherapi/locationforecast/2.0/complete?lat={lat:.4f}&lon={lon:.4f}",
-              "smhi_pmp3g": f"https://opendata-download-metfcst.smhi.se/api/category/pmp3g/version/2/geotype/point/lon/{lon:.4f}/lat/{lat:.4f}/data.json",
-              "openmeteo_models": f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m&forecast_days=1&models=icon_eu,metno_nordic,dmi_harmonie_arome_europe,knmi_harmonie_arome_europe,ecmwf_ifs025,gfs_global,meteofrance_arpege_europe",
-              "openmeteo_previous_runs": f"https://previous-runs-api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,temperature_2m_previous_day1&past_days=3&forecast_days=1&models=icon_eu",
-              "dwd_iconeu_listing": "https://opendata.dwd.de/weather/nwp/icon-eu/grib/00/t_2m/",
+              "fmi_meps_point": f"{fmi}fmi::forecast::meps::surface::point::simple{q}",
+              "fmi_edited_point": f"{fmi}fmi::forecast::edited::weather::scandinavia::point::simple{q}",
+              "fmi_ecmwf_point": f"{fmi}ecmwf::forecast::surface::point::simple{q}",
           }
           s = session(retries=1)
           for name, url in urls.items():
@@ -42,11 +41,7 @@ jobs:
                   print(f"  {k}: {r.headers.get(k)}")
               Path(f"probe/{name}.body").write_bytes(r.content)
               print("body bytes", len(r.content))
-              if name == "fmi_storedqueries":
-                  ids = sorted(set(re.findall(r'StoredQueryDescription id="([^"]+)"', r.text)))
-                  print("forecast stored queries:", [i for i in ids if "forecast" in i])
-              else:
-                  print(r.text[:3500 if name != "dwd_iconeu_listing" else 1200])
+              print(r.text[:3000])
               time.sleep(2)
           PY
       - uses: actions/upload-artifact@v4

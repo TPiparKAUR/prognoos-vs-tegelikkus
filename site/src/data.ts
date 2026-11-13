@@ -56,6 +56,7 @@ export interface BucketScore extends Omit<LeadScore, "lead_h"> {
 export interface StationScore {
   model_id: string;
   network: string;
+  sample: string;
   variable: string;
   truth_level: string;
   interp_method: string;

@@ -129,23 +129,31 @@ def long_errors(pairs: pl.DataFrame) -> pl.DataFrame:
     return pl.concat(parts, how="vertical_relaxed")
 
 
+#: Fair-comparison samples: keys where every listed source has a value (docs/01 section 2).
+#: "common9" adds IFS 0.1 deg (KAUR location-forecast basis), archived from 2026-11-13;
+#: it becomes the page default once it has data, "common" keeps the longer history.
+SAMPLES: Final = {
+    "common": (*MODELS, REFERENCE),
+    "common9": (*MODELS, "ifs-0p1", REFERENCE),
+}
+
+
 def with_samples(long: pl.DataFrame) -> pl.DataFrame:
-    """Duplicate rows into ``sample = all`` and the fair ``sample = common`` subset."""
-    need = (*MODELS, REFERENCE)
-    common_keys = (
-        long.filter(pl.col("model_id").is_in(need))
-        .group_by([*KEYS, "variable"])
-        .agg(pl.col("model_id").n_unique().alias("_m"))
-        .filter(pl.col("_m") == len(need))
-        .drop("_m")
-    )
-    common = long.join(common_keys, on=[*KEYS, "variable"], how="semi")
-    sampled = pl.concat(
-        [
-            long.with_columns(pl.lit("all").alias("sample")),
-            common.with_columns(pl.lit("common").alias("sample")),
-        ]
-    )
+    """Duplicate rows into ``sample = all`` and the fair common samples (``SAMPLES``)."""
+    parts = [long.with_columns(pl.lit("all").alias("sample"))]
+    for name, need in SAMPLES.items():
+        keys = (
+            long.filter(pl.col("model_id").is_in(need))
+            .group_by([*KEYS, "variable"])
+            .agg(pl.col("model_id").n_unique().alias("_m"))
+            .filter(pl.col("_m") == len(need))
+            .drop("_m")
+        )
+        common = long.filter(pl.col("model_id").is_in(need)).join(
+            keys, on=[*KEYS, "variable"], how="semi"
+        )
+        parts.append(common.with_columns(pl.lit(name).alias("sample")))
+    sampled = pl.concat(parts)
     return pl.concat(
         [
             sampled.filter(pl.col("station_class") == "kliima").with_columns(

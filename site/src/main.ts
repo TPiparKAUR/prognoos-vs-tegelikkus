@@ -20,12 +20,12 @@ import type { MapMode, State, StationVar } from "./state";
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
 // Forecast competitors (order = categorical slot order) and the reference.
-const COMPETITORS = ["ifs", "aifs-single", "kaur_asukoht"] as const;
+const COMPETITORS = ["ifs", "aifs-single", "ifs-0p1"] as const;
 const REF = "persistence";
 const SHORT: Record<string, string> = {
   ifs: "IFS",
   "aifs-single": "AIFS",
-  kaur_asukoht: "KAUR asukoht",
+  "ifs-0p1": "IFS 9 km",
   persistence: "Persistents",
 };
 const VARS: [string, string][] = [
@@ -49,7 +49,7 @@ const colorOf = (m: string): string =>
     ? cssVar("--series-ifs")
     : m === "aifs-single"
       ? cssVar("--series-aifs")
-      : m === "kaur_asukoht"
+      : m === "ifs-0p1"
         ? cssVar("--series-kaur")
         : cssVar("--series-ref");
 
@@ -71,15 +71,26 @@ function stationVar(variable: string, cls: "kliima" | "xml"): string {
   return variable === "t2m" && cls === "xml" ? "t2m_nocorr" : variable;
 }
 
+/** "common9" (with IFS 9 km) once it has data for this selection, else "common". */
+function sampleFor(s: State, variable: string): string {
+  const v = effVar(variable, s.network);
+  const has9 = data.bucket.some(
+    (r) =>
+      r.sample === "common9" && r.variable === v && r.truth_level === s.truth && r.interp_method === s.method && r.network === s.network && r.n > 0,
+  );
+  return has9 ? "common9" : "common";
+}
+
 function bucketRows(s: State, variable: string): BucketScore[] {
   const v = effVar(variable, s.network);
+  const sample = sampleFor(s, variable);
   return data.bucket.filter(
     (r) =>
       r.variable === v &&
       r.truth_level === s.truth &&
       r.interp_method === s.method &&
       r.network === s.network &&
-      r.sample === "common",
+      r.sample === sample,
   );
 }
 
@@ -91,7 +102,7 @@ function leadRows(s: State, variable: string): LeadScore[] {
       r.truth_level === s.truth &&
       r.interp_method === s.method &&
       r.network === s.network &&
-      r.sample === "common" &&
+      r.sample === sampleFor(s, variable) &&
       r.lead_h > 0,
   );
 }
@@ -183,7 +194,7 @@ function sanitize(s: State): State {
   if (!(out.method in data.meta.methods)) out.method = store.DEFAULTS.method;
   if (!VARS.some(([v]) => v === out.variable)) out.variable = store.DEFAULTS.variable;
   if (!data.meta.lead_buckets.includes(out.bucket)) out.bucket = store.DEFAULTS.bucket;
-  if (!["better", "ifs", "aifs-single"].includes(out.mapMode)) out.mapMode = "better";
+  if (!["better", "ifs", "aifs-single", "ifs-0p1"].includes(out.mapMode)) out.mapMode = "better";
   if (!["t2m", "wind", "mslp", "precip"].includes(out.stationVar)) out.stationVar = "t2m";
   if (out.station && !stationsById.has(out.station)) out.station = resolveOldId(out.station);
   if (!out.station && stationsById.has("AJHARK01")) out.station = "AJHARK01";
@@ -334,6 +345,9 @@ function renderLeaderboard(s: State): void {
   $("leaderboard-hint").textContent =
     `Lahtris: kõige väiksema veaga prognoos, selle MAE ja kui palju suurem on teise viga. „Persistents parem“: eilne vaatlus oli täpsem. Hall = vähem kui ${MIN_N_RELIABLE} paari. ` +
     (pend.length ? `Ootel: ${pend.map((m) => SHORT[m]).join(", ")} (andmeallikas pole veel kättesaadav, vt jaotis 4). ` : "") +
+    (sampleFor(s, s.variable) === "common"
+      ? "IFS 9 km (KAURi asukohaprognoosi alus) kogub andmeid alates 13.11 – see lisandub tabelisse, kui tal on samad juhtumid mis teistel. "
+      : "IFS 9 km = KAURi asukohaprognoosi alus (sama mudel ja lähima ruudupunkti meetod, ECMWF avaandmetest). ") +
     "Klõpsa real, et näha graafikuid.";
 }
 
@@ -402,16 +416,22 @@ function renderLeadCharts(s: State): void {
 }
 
 // ---------------------------------------------------------------- 2. map + list
+function stationSample(rows: StationScore[]): StationScore[] {
+  const nine = rows.filter((r) => r.sample === "common9");
+  return nine.length ? nine : rows.filter((r) => r.sample === "common");
+}
+
 function stationScoreRows(s: State): Map<string, StationScore[]> {
   const out = new Map<string, StationScore[]>();
   for (const r of data.station) {
-    if (r.truth_level !== s.truth || r.interp_method !== s.method || r.lead_bucket !== s.bucket) continue;
+    if (r.sample === "all" || r.truth_level !== s.truth || r.interp_method !== s.method || r.lead_bucket !== s.bucket) continue;
     const f = stationsById.get(r.station_id);
     if (!f || r.variable !== stationVar(s.variable, f.properties.class)) continue;
     const list = out.get(r.station_id) ?? [];
     list.push(r);
     out.set(r.station_id, list);
   }
+  for (const [k, v] of out) out.set(k, stationSample(v));
   return out;
 }
 
@@ -646,7 +666,9 @@ async function renderStation(s: State): Promise<void> {
   // KPIs + error by bucket from station scores
   const v = stationVar(s.variable, p.class);
   const unit = unitOf(v);
-  const rowsAll = data.station.filter((r) => r.station_id === p.id && r.truth_level === s.truth && r.interp_method === s.method && r.variable === v);
+  const rowsAll = stationSample(
+    data.station.filter((r) => r.station_id === p.id && r.truth_level === s.truth && r.interp_method === s.method && r.variable === v),
+  );
   const kpis = [...COMPETITORS, REF]
     .map((m) => ({ m, r: rowsAll.find((r) => r.model_id === m && r.lead_bucket === s.bucket) }))
     .filter((x) => x.r);
@@ -919,6 +941,7 @@ async function init(): Promise<void> {
       ["better", "Kumb parem"],
       ["ifs", "IFS viga"],
       ["aifs-single", "AIFS viga"],
+      ["ifs-0p1", "IFS 9 km viga"],
     ],
     "mapMode",
   );

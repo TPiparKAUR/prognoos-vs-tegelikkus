@@ -42,6 +42,28 @@ expected_steps."18" = [[0, 360, 6]]
 # ECMWF fixed it from 2026-05-13 06 UTC. Earlier runs are refused until reviewed.
 min_issue_time_utc = "2026-05-13T06:00:00Z"
 
+# IFS at 0.1 deg (~9 km): the basis of the KAUR location forecast. The KAUR page
+# ilmateenistus.ee/ilm/prognoosid/asukoha-prognoos states (2026-11-13): "Asukohapõhine
+# prognoos baseerub ECMWF ... (ECMWF IFS) andmetel ... ruudu küljepikkus ~9 km ...
+# interpoleeritakse lähima ruudu mudelprognoosid" (nearest grid point). Open data since
+# 2026-10-20; files split into -sfc/-pl (observed 2026-11-13); same steps as 0.25 deg.
+[models.ifs-0p1]
+client_model = "ifs"
+resol = "0p1"
+stream = "oper"
+type = "fc"
+runs_utc = [0, 6, 12, 18]
+candidate_steps = [[0, 144, 3], [150, 360, 6]]
+expected_steps."00" = [[0, 144, 3], [150, 360, 6]]
+expected_steps."06" = [[0, 144, 3]]
+expected_steps."12" = [[0, 144, 3], [150, 360, 6]]
+expected_steps."18" = [[0, 144, 3]]
+extra_step_params = ["10fg"]
+# Archive start: first runs after this change (0.1 deg open data exists from 2026-10-20).
+min_issue_time_utc = "2026-11-12T00:00:00Z"
+# Box on the 0.1 deg grid (bounds must be grid multiples): 32 x 79 points.
+area = { lat_min_deg = 57.2, lat_max_deg = 60.3, lon_min_deg = 21.0, lon_max_deg = 28.8, grid_increment_deg = 0.1 }
+
 # Fields archived for every step (levtype=sfc). Units are read from GRIB and
 # converted explicitly in pvt.units; an unknown unit aborts the run.
 [fields]
@@ -59,6 +81,11 @@ static_params = ["z", "lsm"]
 cycle = "50r1"
 valid_from_utc = "2026-05-12T00:00:00Z"
 source = "ECMWF news item, 2026-05-12"
+
+[[model_cycles.ifs-0p1]]
+cycle = "50r1"
+valid_from_utc = "2026-05-12T00:00:00Z"
+source = "ECMWF news item, 2026-05-12 (same IFS cycle, 0.1 deg open-data grid)"
 
 [[model_cycles.aifs-single]]
 cycle = "aifs-v2"
