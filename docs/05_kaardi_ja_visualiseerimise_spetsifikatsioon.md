@@ -29,3 +29,23 @@
 - Aeg: Eesti aeg märgisega „EET/EEST", tööriistavihjes ka UTC.
 - Päis igal lehel: „Eksperimentaalne, mitteametlik. Ei asenda KAURi ametlikku prognoosi ega hoiatusi." + viited (KAUR, ECMWF CC BY 4.0).
 - Mobiil: kaart + üks diagramm vertikaalselt; filtrid sahtlis.
+
+---
+
+## Lisa 2026-11-13: disainisuunad etapiks E4 (tellija soov: stiilne, kaasaegne, mobiilist suure ekraanini)
+
+- **Tööriistad, mida E4-s kasutan:** sessiooni oskused `dataviz` (diagrammide vorm, värvivalem
+  koos kontrastivalidaatoriga, heledas ja tumedas teemas ühtne) ja `artifact-design`
+  (paigutus, tüpograafia, teemad); kaart MapLibre GL JS (ADR-011), diagrammid ühe teegiga
+  (Observable Plot), kõik eelarvutatud JSON-ist, ilma serverita.
+- **Paigutus:** mobiil-esmane CSS grid; ≤ 640 px üks veerg (kaart → valitud jaama meteogramm
+  „prognoos vs vaatlus" → skoorikaart), ≥ 1024 px kaart + külgpaneel, ≥ 1440 px kolm veergu;
+  filtrid mobiilis alt avanevas sahtlis. Süsteemne heledus/tume teema (`prefers-color-scheme`).
+- **Põhivaade „asukohapõhine valideerimine":** jaama valik kaardilt või otsingust → üks
+  meteogramm, kus samal ajateljel vaatlus (T1/T2 eristatud), IFS, AIFS, KAURi asukohaprognoos
+  (sisevaade) ja ebakindlusribad; etteande liugur. Sademetel veapiir (ADR-005) nähtav.
+- **Ligipääsetavus:** WCAG 2.1 AA, kontrast ≥ 4,5:1, värv pole ainus kanal (sümbol + muster),
+  klaviatuur, iga diagrammi kõrval tabel.
+- **Viited igal lehel:** jalus allikatega (ECMWF CC BY 4.0 näidisviide; „Allikas:
+  Keskkonnaagentuur" + link ilmateenistus.ee; kliimaandmestik CC BY 4.0) ning iga arvu
+  tööriistavihjes päritolu silt ja tõetase (docs/06 §4 p 5).

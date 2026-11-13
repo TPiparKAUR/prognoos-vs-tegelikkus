@@ -49,7 +49,7 @@ def test_parse_observations_fixture(real_stations: Settings) -> None:
     assert harku["precipitations_1h_mm"] == 0.2
     assert harku["phenomenon"] == "Light shower"
     kur = df.filter(pl.col("station_name") == "Kuressaare linn").row(0, named=True)
-    assert kur["station_id"] == "XML_KURESSAARE_LINN"
+    assert kur["station_id"] == "XML_KURESSAARE_LINN_58264_22489"
     assert kur["wmo_code"] is None
     assert kur["windspeed_m_s"] is None
     narva = df.filter(pl.col("station_name") == "Narva").row(0, named=True)
@@ -69,7 +69,20 @@ def test_store_observations_is_idempotent(real_stations: Settings) -> None:
     targets = station_targets(real_stations)
     extra = targets.filter(~pl.col("verified")).get_column("station_id").to_list()
     # only XML stations that are not climate stations are added (unverified)
-    assert extra == ["XML_HAAPSALU", "XML_KURESSAARE_LINN"]
+    assert extra == ["XML_HAAPSALU_58945_23555", "XML_KURESSAARE_LINN_58264_22489"]
+
+
+def test_duplicate_station_names_are_kept_apart(real_stations: Settings) -> None:
+    """The live XML contains repeated station names (observed 2026-11-13 on GitHub)."""
+    block = OBS[OBS.index(b"<station>\n<name>Haapsalu") : OBS.index(b"</observations>")]
+    moved = block.replace(b"58.945277777444446", b"58.9").replace(
+        b"<airtemperature>3.6", b"<airtemperature>3.9"
+    )
+    doc = OBS.replace(b"</observations>", block + moved + block + b"</observations>")
+    _, df = obs_xml.parse_observations(doc, [])
+    hap = df.filter(pl.col("station_name") == "Haapsalu")
+    assert hap.height == 2  # exact duplicate dropped, different position kept
+    assert hap.get_column("station_id").n_unique() == 2
 
 
 def test_malformed_observations_rejected(real_stations: Settings) -> None:

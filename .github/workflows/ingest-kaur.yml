@@ -31,5 +31,12 @@ jobs:
         continue-on-error: true
       - if: always()
         run: uv run python ci/github_release_sync.py push --data-root "$PVT_DATA_ROOT" --since-file .sync-start
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quarantine
+          path: data/quarantine/
+          if-no-files-found: ignore
+          retention-days: 14
       - if: steps.obs.outcome == 'failure' || steps.fc.outcome == 'failure'
         run: exit 1

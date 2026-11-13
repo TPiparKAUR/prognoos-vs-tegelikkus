@@ -155,8 +155,8 @@ def xml_stations_path(data_root: Path) -> Path:
 def station_targets(settings: Settings) -> pl.DataFrame:
     """All locations at which forecasts are archived, sorted by station_id.
 
-    Verified stations from config, plus observations-XML stations that do not match a
-    verified station (same name or within 1 km).
+    Verified stations from config, plus observations-XML stations that are not within
+    1 km of a verified station.
     """
     rows: list[dict[str, Any]] = [
         {
@@ -176,8 +176,7 @@ def station_targets(settings: Settings) -> pl.DataFrame:
         verified = rows.copy()
         for x in pl.read_parquet(xml_path).iter_rows(named=True):
             dup = any(
-                v["name"] == x["name"]
-                or haversine_km(v["lat_deg"], v["lon_deg"], x["lat_deg"], x["lon_deg"])
+                haversine_km(v["lat_deg"], v["lon_deg"], x["lat_deg"], x["lon_deg"])
                 < MATCH_RADIUS_KM
                 for v in verified
             )

@@ -69,7 +69,7 @@ OBS_XML: Final[dict[str, pl.DataType]] = {
     "ingest_version": pl.String(),
     "schema_version": pl.String(),
 }
-OBS_XML_KEY: Final = ("snapshot_time_utc", "station_name")
+OBS_XML_KEY: Final = ("snapshot_time_utc", "station_id")
 
 XML_STATIONS: Final[dict[str, pl.DataType]] = {
     "station_id": pl.String(),
@@ -137,15 +137,14 @@ def parse_observations(
             raise ObsXmlError("station without name")
         lat = _float(_text(st, "latitude"), "latitude", name)
         lon = _float(_text(st, "longitude"), "longitude", name)
-        sid = "XML_" + slug(name)
-        for v in verified:
-            if v["name"] == name or (
-                lat is not None
-                and lon is not None
-                and haversine_km(v["lat_deg"], v["lon_deg"], lat, lon) < MATCH_RADIUS_KM
-            ):
-                sid = v["station_id"]
-                break
+        sid = xml_station_id(name, lat, lon)
+        # Station names are not unique in the XML (e.g. a meteorological and a hydrological
+        # station share a name), so climate stations are matched by position only.
+        if lat is not None and lon is not None:
+            for v in verified:
+                if haversine_km(v["lat_deg"], v["lon_deg"], lat, lon) < MATCH_RADIUS_KM:
+                    sid = v["station_id"]
+                    break
         row: dict[str, Any] = {
             "snapshot_time_utc": snap,
             "station_id": sid,
@@ -161,7 +160,19 @@ def parse_observations(
     if not rows:
         raise ObsXmlError("no <station> elements")
     cols = [c for c in OBS_XML if c in rows[0]]
-    return snap, pl.DataFrame(rows, schema={c: OBS_XML[c] for c in cols})
+    df = pl.DataFrame(rows, schema={c: OBS_XML[c] for c in cols})
+    exact = df.height - df.unique().height
+    if exact:
+        LOG.warning("obs_xml %s: %d exact duplicate station entries dropped", snap, exact)
+        df = df.unique(maintain_order=True)
+    return snap, df
+
+
+def xml_station_id(name: str, lat: float | None, lon: float | None) -> str:
+    """Stable id of an XML-only station: name slug plus position (names are not unique)."""
+    if lat is None or lon is None:
+        return f"XML_{slug(name)}"
+    return f"XML_{slug(name)}_{round(lat * 1000):d}_{round(lon * 1000):d}"
 
 
 def _day_parquet(data_root: Path, day: dt.date) -> Path:
@@ -176,12 +187,12 @@ def update_xml_station_registry(data_root: Path, obs: pl.DataFrame) -> bool:
     """
     path = xml_stations_path(data_root)
     cur = pl.read_parquet(path) if path.exists() else pl.DataFrame(schema=XML_STATIONS)
-    known = {r["name"]: r for r in cur.iter_rows(named=True)}
+    known = {r["station_id"]: r for r in cur.iter_rows(named=True)}
     new_rows = []
     for r in obs.filter(
         pl.col("lat_deg").is_not_null() & pl.col("lon_deg").is_not_null()
     ).iter_rows(named=True):
-        k = known.get(r["station_name"])
+        k = known.get(r["station_id"])
         if k is None:
             new_rows.append(
                 {
