@@ -54,6 +54,9 @@ ignore = [
 "tests/**" = ["S101", "D", "PLR2004"]
 "scratch/**" = ["ALL"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["pvt", "ci", "tests"]
+
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
 
@@ -62,7 +65,7 @@ python_version = "3.12"
 strict = true
 warn_unreachable = true
 mypy_path = "src"
-packages = ["pvt"]
+files = ["src/pvt", "ci"]
 
 [[tool.mypy.overrides]]
 # Third-party packages without type information.

@@ -39,3 +39,18 @@ Formaat: kontekst · alternatiivid · poolt/vastu · valik · tagajärjed · all
 **ADR-013 Ansamblid (IFS ENS, AIFS ENS) faasis 2** – maht ja keerukus; skeem toetab `member` veergu.
 
 **ADR-014 Python 3.12, uv, Ruff, MyPy (strict uutes moodulites), pytest** – 3.14 ei kasutata, sest eccodes/cfgrib/earthkit binaarrataste tugi tuleb enne kontrollida (Tõlgendus).
+
+---
+
+## Lisatud etapis E1 (2026-11-13)
+
+**ADR-015 Arhiveeritakse Eesti kohal 0,25° ruudupunktide kast, jaamapunkt tuletatakse sellest** (staatus: ettepanek)
+- Kontekst: arhiiv peab kohe käivituma, kuid ühegi jaama koordinaadid/EH2000 kõrgus ei ole allikaga kinnitatud (allikas ilmateenistus.ee ei olnud arenduskeskkonnast ligipääsetav). Jaamapõhine väljavõte praegu = tühi arhiiv.
+- Alternatiivid: (a) oodata jaamade kinnitamist; (b) väljavõte kinnitamata koordinaatidel; (c) kast 57,25–60,25° N × 21,00–28,75° E (13 × 32 = 416 punkti), jaamapunkt (lähim maapunkt / bilineaarne / kõrguskorrektsioon, ADR-006) tuletatakse etapis E2.
+- Poolt (c): arhiiv ei sõltu jaamaloendist; uue jaama lisamine ei vaja uut allalaadimist; bilineaarne interpolatsioon ja lähima maapunkti valik on võimalikud tagantjärele; mudelipõhine orograafia ja maa/mere mask salvestatakse (IFS-i ja AIFS-i `z`/`lsm` erinevad – vaadeldud 2026-11-12 06 UTC jooksus, Tallinna lähedal lsm 0,16 vs 0,49). Vastu: maht ~16× suurem kui 25 jaama korral (mõõdetud väärtus: reports/stage_1.md).
+- Valik: (c). Salvestus Parquet (ADR-009); ADR-009 „muudaks"-tingimus (ruudustiku arhiiv → Zarr) ei rakendu, sest kast on väike ja käsitletav punktitabelina. Muudaks: kasti laiendamine või 0,1° IFS (siis Zarr + xarray).
+
+**ADR-016 AWS-peegel on esmane allikas; avaandmete ajalugu on peeglis pikem kui 2–4 päeva** (staatus: ettepanek)
+- Fakt (vaatlus 2026-11-13, AWS S3 nimekiri `ecmwf-forecasts`): kuupäevakaustad alates 2023-01-18; IFS 0,25° ja AIFS (`aifs/`, hiljem `aifs-single/`) olemas nt 2024-03-01, 2025-06-01, 2026-03-01. ECMWF-i enda portaal (data.ecmwf.int) hoiab ametlikult ~12 jooksu.
+- Tõlgendus: ajaloo täitmine (backfill) võib olla võimalik ilma MARS-ita. Teadmata: AWS-i säilituspoliitika (pole dokumenteeritud allikat leitud) – sellele ei tohi arhiivi ohutus toetuda.
+- Valik: allikate järjekord `aws → google → azure → ecmwf` (settings.toml); backfill enne 2026-05-13 06 UTC on koodis keelatud (06/18 UTC `scda` voog enne 50r1; AIFS v2 pikkuskraadi viga), kuni see on eraldi läbi testitud.

@@ -1,0 +1,88 @@
+# Primary CI (ADR-010): gitlab.sise.envir.ee.
+#
+# Pipeline schedules are configured in the GitLab UI (CI/CD > Schedules), cron in UTC:
+#   "ECMWF ingest"   17 */2 * * *   variable PVT_JOB=ingest   (docs/03 section 4: every 2 h at :17)
+#   "Daily monitor"  17 8 * * *     variable PVT_JOB=monitor
+# Score + site jobs are added in stages E3/E4.
+#
+# Required CI/CD variables for scheduled jobs (open question docs/07 Q3: where the archive lives):
+#   PVT_DATA_ROOT  absolute path of the persistent archive mounted into the runner
+# Optional:
+#   PVT_CI_IMAGE   image from the internal registry/mirror if Docker Hub is not reachable
+
+variables:
+  PVT_CI_IMAGE: "python:3.12-slim-bookworm"
+  UV_VERSION: "0.11.32"
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.uv-cache"
+  UV_LINK_MODE: copy
+  PVT_INGEST_VERSION: "$CI_COMMIT_SHORT_SHA"
+
+default:
+  image: $PVT_CI_IMAGE
+  before_script:
+    - pip install --no-cache-dir "uv==${UV_VERSION}"
+    - uv sync --frozen
+  cache:
+    key:
+      files: [uv.lock]
+    paths: [.uv-cache/]
+
+stages: [lint, test, ingest, monitor]
+
+.not_scheduled: &not_scheduled
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - when: on_success
+
+lint:
+  stage: lint
+  <<: *not_scheduled
+  script:
+    - uv run ruff check .
+    - uv run ruff format --check .
+    - uv run mypy
+
+test:
+  stage: test
+  <<: *not_scheduled
+  script:
+    - uv run pytest --junitxml=report.xml
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+
+.needs_archive: &needs_archive
+  - |
+    if [ -z "${PVT_DATA_ROOT:-}" ] || [ ! -d "${PVT_DATA_ROOT}" ]; then
+      echo "PVT_DATA_ROOT is not set or not a directory; refusing to write an ephemeral archive." >&2
+      exit 3
+    fi
+
+ingest-ecmwf:
+  stage: ingest
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $PVT_JOB == "ingest"
+  # Never two writers on the same archive.
+  resource_group: ecmwf-archive
+  timeout: 100m
+  script:
+    - *needs_archive
+    - uv run pvt ingest-ecmwf
+
+monitor:
+  stage: monitor
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && ($PVT_JOB == "ingest" || $PVT_JOB == "monitor")
+      when: always
+  resource_group: ecmwf-archive
+  script:
+    - *needs_archive
+    - rc=0; uv run pvt monitor || rc=$?
+    - cp "$PVT_DATA_ROOT/status/freshness.json" "$PVT_DATA_ROOT/status/ecmwf_inventory.json" .
+    - exit $rc  # 1 = stale archive -> red pipeline (notification channel: open question)
+  artifacts:
+    when: always
+    paths: [freshness.json, ecmwf_inventory.json]
+    expire_in: 30 days

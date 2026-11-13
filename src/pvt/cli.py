@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import time
 from collections.abc import Sequence
@@ -44,7 +45,8 @@ def setup_logging(level: str) -> None:
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level.upper())
-    # Third-party progress/debug noise.
+    # Third-party progress bars (tqdm via multiurl) and debug noise do not belong in CI logs.
+    os.environ.setdefault("TQDM_DISABLE", "1")
     for noisy in ("urllib3", "multiurl", "ecmwf.opendata"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
