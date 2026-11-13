@@ -1,0 +1,79 @@
+[project]
+name = "prognoos-vs-tegelikkus"
+version = "0.1.0"
+description = "Station-based verification of ECMWF IFS and AIFS Single forecasts against KAUR observations (experimental, unofficial)."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # ECMWF open data client; >=0.3.35 handles the 2026-05-12 (IFS 50r1) 06/18 UTC stream change.
+    "ecmwf-opendata>=0.3.35",
+    # GRIB decoding (ECMWF's own library; wheels bundle the binary via eccodeslib).
+    "eccodes>=2.38",
+    # Binary ecCodes library wheel. eccodes declares it with a dynamic marker that uv's
+    # resolver does not pick up, so it is listed explicitly (no system libeccodes needed).
+    "eccodeslib>=2.38; platform_system != 'Windows'",
+    "numpy>=2.0",
+    # Parquet I/O and aggregation (ADR-009, org standard: Polars/DuckDB over pandas).
+    "polars>=1.20",
+    # Used directly for index discovery (HEAD requests); already a dependency of ecmwf-opendata.
+    "requests>=2.31",
+]
+
+[project.scripts]
+pvt = "pvt.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "ruff>=0.8",
+    "types-requests>=2.31",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pvt"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "DTZ", "PT", "SIM", "RUF", "D", "S", "PTH", "LOG", "G"]
+ignore = [
+    "D100", "D104", "D105", "D107", "D203", "D213",
+    # GRIB/requests usage is intentional; subprocess is only used for `git rev-parse`.
+    "S603", "S607",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "D", "PLR2004"]
+"scratch/**" = ["ALL"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+mypy_path = "src"
+packages = ["pvt"]
+
+[[tool.mypy.overrides]]
+# Third-party packages without type information.
+module = ["eccodes", "eccodes.*", "ecmwf.opendata", "ecmwf.opendata.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers -m 'not network'"
+markers = [
+    "network: tests that reach external services (ECMWF mirrors); run with `-m network`",
+]
+filterwarnings = ["error::pytest.PytestUnraisableExceptionWarning"]

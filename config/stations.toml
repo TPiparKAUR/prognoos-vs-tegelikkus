@@ -1,0 +1,144 @@
+# Station register (docs/08: only source-confirmed IDs, coordinates and EH2000 heights).
+#
+# Station names and local KAUR station codes below are taken verbatim from
+# "Kliimaandmestiku kirjeldus" (Keskkonnaportaal, page updated 2026-03-27):
+#   https://keskkonnaportaal.ee/et/avaandmed/kliimaandmestik/kliimaandmestiku-kirjeldus
+# Coordinates, EH2000 heights and WMO codes are NOT filled in: their source
+# ("Seirejaamade metainfo", https://www.ilmateenistus.ee/meist/vaatlusvork/) and the
+# observations XML could not be reached from the development environment on 2026-11-13.
+# Therefore every station is verified = false and is excluded from scoring.
+#
+# To verify a station, fill in ALL of: lat_deg, lon_deg (EPSG:4326), height_m_EH2000,
+# coord_source_uri, height_source_uri (and wmo_code if the source gives one), then set
+# verified = true. `pvt` refuses a verified station with any of these missing.
+# Never enter BK77 heights here without conversion to EH2000.
+
+[meta]
+schema_version = "1.0.0"
+id_source_uri = "https://keskkonnaportaal.ee/et/avaandmed/kliimaandmestik/kliimaandmestiku-kirjeldus"
+id_source_checked_utc = "2026-11-13T00:20:00Z"
+
+[[station]]
+station_id = "AJHELT01"
+name = "Heltermaa"
+verified = false
+
+[[station]]
+station_id = "AJJOGE01"
+name = "Jõgeva"
+verified = false
+
+[[station]]
+station_id = "AJJOHV01"
+name = "Jõhvi"
+verified = false
+
+[[station]]
+station_id = "AJKIHN01"
+name = "Kihnu"
+verified = false
+
+[[station]]
+station_id = "AJKUND01"
+name = "Kunda"
+verified = false
+
+[[station]]
+station_id = "AJKUUS01"
+name = "Kuusiku"
+verified = false
+
+[[station]]
+station_id = "AJNIGU01"
+name = "Lääne-Nigula"
+verified = false
+
+[[station]]
+station_id = "AJNARV01"
+name = "Narva"
+verified = false
+
+[[station]]
+station_id = "AJPAKR01"
+name = "Pakri"
+verified = false
+
+[[station]]
+station_id = "AJPARN01"
+name = "Pärnu"
+verified = false
+
+[[station]]
+station_id = "AJRIST01"
+name = "Ristna"
+verified = false
+
+[[station]]
+station_id = "AJROOM01"
+name = "Roomassaare"
+verified = false
+
+[[station]]
+station_id = "AJRUHN01"
+name = "Ruhnu"
+verified = false
+
+[[station]]
+station_id = "AJSORV01"
+name = "Sõrve"
+verified = false
+
+[[station]]
+station_id = "AJHARK01"
+name = "Tallinn-Harku"
+verified = false
+
+[[station]]
+station_id = "AJTART01"
+name = "Tartu-Tõravere"
+verified = false
+
+[[station]]
+station_id = "AJTIIR01"
+name = "Tiirikoja"
+verified = false
+
+[[station]]
+station_id = "AJTOOM01"
+name = "Tooma"
+verified = false
+
+[[station]]
+station_id = "AJTURI01"
+name = "Türi"
+verified = false
+
+[[station]]
+station_id = "AJVALG01"
+name = "Valga"
+verified = false
+
+[[station]]
+station_id = "AJVILJ01"
+name = "Viljandi"
+verified = false
+
+[[station]]
+station_id = "AJVILS01"
+name = "Vilsandi"
+verified = false
+
+[[station]]
+station_id = "AJVIRT01"
+name = "Virtsu"
+verified = false
+
+[[station]]
+station_id = "AJVORU01"
+name = "Võru"
+verified = false
+
+[[station]]
+station_id = "AJV-MA01"
+name = "Väike-Maarja"
+verified = false

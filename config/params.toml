@@ -1,0 +1,63 @@
+# Model and parameter definitions for ECMWF open data ingestion.
+#
+# Step lists below are CANDIDATES only. The ingest probes the index file of every
+# candidate step and archives what actually exists (docs/08: "read actual steps,
+# do not assume"). `expected_steps` is used to decide whether a run is complete and
+# by the monitor. Values were observed on the AWS mirror for 2026-11-12 runs:
+#   IFS 00/12 UTC: 0-144 by 3, 150-360 by 6 (85 steps)
+#   IFS 06/18 UTC: 0-144 by 3               (49 steps)  <- resolves the docs/01 conflict
+#   AIFS Single:   0-360 by 6               (61 steps), all four runs
+# If ECMWF changes the schedule, the ingest logs the difference and the monitor flags it.
+
+[models.ifs]
+client_model = "ifs"
+resol = "0p25"
+stream = "oper"
+type = "fc"
+runs_utc = [0, 6, 12, 18]
+candidate_steps = [[0, 144, 3], [150, 360, 6]]  # [start, stop, by], inclusive
+expected_steps."00" = [[0, 144, 3], [150, 360, 6]]
+expected_steps."06" = [[0, 144, 3]]
+expected_steps."12" = [[0, 144, 3], [150, 360, 6]]
+expected_steps."18" = [[0, 144, 3]]
+# Earliest issue time this code is allowed to archive (backfill guard). Before
+# 2026-05-12 the 06/18 UTC runs used stream=scda; not tested in stage E1.
+min_issue_time_utc = "2026-05-13T06:00:00Z"
+
+[models.aifs-single]
+client_model = "aifs-single"
+resol = "0p25"
+stream = "oper"
+type = "fc"
+runs_utc = [0, 6, 12, 18]
+candidate_steps = [[0, 360, 6]]
+expected_steps."00" = [[0, 360, 6]]
+expected_steps."06" = [[0, 360, 6]]
+expected_steps."12" = [[0, 360, 6]]
+expected_steps."18" = [[0, 360, 6]]
+# docs/07 R4: AIFS v2 longitudes were unintentionally changed after 2026-05-12;
+# ECMWF fixed it from 2026-05-13 06 UTC. Earlier runs are refused until reviewed.
+min_issue_time_utc = "2026-05-13T06:00:00Z"
+
+# Fields archived for every step (levtype=sfc). Units are read from GRIB and
+# converted explicitly in pvt.units; an unknown unit aborts the run.
+[fields]
+step_params = ["2t", "10u", "10v", "msl", "tp"]
+# Static fields taken from step 0 only (per model: IFS and AIFS static fields differ).
+static_params = ["z", "lsm"]
+
+# Model cycle bookkeeping. GRIB open data carries no cycle name, so the cycle is
+# assigned from this table by issue time; the GRIB key generatingProcessIdentifier
+# is archived alongside and the monitor flags any change in it.
+# Source: ECMWF news 2026-05-12 "Cycle 50r1, has gone live today (12 May 2026)
+# alongside an update to the Artificial Intelligence Forecasting System (AIFS v2)".
+# VERIFY: whether any later cycle went live between 2026-05-12 and today.
+[[model_cycles.ifs]]
+cycle = "50r1"
+valid_from_utc = "2026-05-12T00:00:00Z"
+source = "ECMWF news item, 2026-05-12"
+
+[[model_cycles.aifs-single]]
+cycle = "aifs-v2"
+valid_from_utc = "2026-05-12T00:00:00Z"
+source = "ECMWF news item, 2026-05-12"

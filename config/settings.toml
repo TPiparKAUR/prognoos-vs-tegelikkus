@@ -1,0 +1,48 @@
+# Runtime settings for `pvt`. Paths are relative to the repository root unless absolute.
+# Environment overrides: PVT_DATA_ROOT, PVT_CONFIG_DIR, PVT_INGEST_VERSION.
+
+[paths]
+data_root = "data"
+
+[ecmwf]
+# Mirrors tried in order (names as understood by ecmwf-opendata Client(source=...)).
+# Observed 2026-11-13: data.ecmwf.int was not reachable from the development sandbox,
+# AWS and Google mirrors were. AWS answered "SlowDown" under burst HEAD requests,
+# so discovery is rate-limited and falls back to the next mirror.
+sources = ["aws", "google", "azure", "ecmwf"]
+# Scheduled runs look back this far for runs that are not yet archived.
+lookback_hours = 96
+# Do not even probe a run younger than this (ecmwf-opendata README: data available
+# 7-9 h after the run start; AIFS earlier). Probing earlier only wastes requests.
+min_age_hours = 5
+# If a run is older than this and some expected steps are still missing, archive what
+# exists with status "partial" (it is retried on later invocations while in lookback).
+partial_after_hours = 14
+# Steps per ecmwf-opendata retrieve() call (one temporary GRIB file per batch).
+steps_per_batch = 12
+# Retry behaviour passed to ecmwf-opendata / requests.
+maximum_retries = 4
+retry_after_seconds = 20
+http_timeout_seconds = 60
+# Pause between index HEAD probes (seconds) to stay below mirror rate limits.
+probe_pause_seconds = 0.05
+
+# Regional sub-grid archived for every run (ADR-015, proposal). Inclusive bounds in
+# EPSG:4326 degrees; longitudes in [-180, 180). Covers Estonia incl. Ruhnu, Vilsandi,
+# Vaindloo and Lake Peipus with >= 1 grid cell margin for bilinear interpolation.
+[ecmwf.area]
+lat_min_deg = 57.25
+lat_max_deg = 60.25
+lon_min_deg = 21.00
+lon_max_deg = 28.75
+grid_increment_deg = 0.25
+
+[monitor]
+# docs/03 section 7. Only ECMWF is implemented in stage E1; the others are reported
+# as "not_implemented" and do not fail the pipeline yet.
+max_age_hours_ecmwf = 18
+max_age_hours_obs_xml = 2
+max_age_hours_kliima = 48
+# Window for the run inventory (acceptance criterion 1 in docs/06 section 4).
+inventory_days = 14
+min_completeness_fraction = 0.95

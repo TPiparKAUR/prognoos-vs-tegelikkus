@@ -1,0 +1,25 @@
+# Archive and intermediate data never go into git (GRIB is never stored at all).
+/data/
+*.grib
+*.grib2
+*.idx
+*.index
+*.parquet
+!tests/fixtures/*.parquet
+
+# Python / tooling
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Throwaway work (see scratch/README.md)
+/scratch/*
+!/scratch/README.md
