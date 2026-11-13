@@ -1,0 +1,50 @@
+# One-off probe from a GitHub runner: KAUR location-forecast data URI (ADR-017) and the
+# Maa- ja Ruumiamet grey basemap WMS capabilities (basemap requested by the owner).
+# The URI is the one the official page ilmateenistus.ee/ilm/prognoosid/asukoha-prognoos uses
+# (variable meteogramDataUri). Use of the service for this project: owner decision 2026-11-13.
+# Prints status, headers and the start of the body; the full bodies are kept as an artifact.
+name: probe-location-fc
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - shell: bash
+        run: |
+          mkdir -p probe
+          uv run python - <<'EOF'
+          from pathlib import Path
+          from pvt.ingest.http import session
+          base = "https://ilmmicroservice.envir.ee/api/forecasts/modelForecastByLocation"
+          urls = {
+              "maaamet_hallkaart_capabilities": "https://kaart.maaamet.ee/wms/hallkaart?service=WMS&version=1.3.0&request=GetCapabilities",
+              "harku_noid": f"{base}?lang=et&coordinates=59.398122;24.60287",
+              "page_example": f"{base}?locationId=784&lang=et&coordinates=59.427711;24.547467&showWarnings=1",
+          }
+          s = session(retries=1)
+          for name, url in urls.items():
+              print(f"=== {name}: {url}")
+              try:
+                  r = s.get(url, timeout=60)
+              except Exception as exc:  # noqa: BLE001 - probe: report any failure
+                  print("ERROR", type(exc).__name__, exc)
+                  continue
+              print("status", r.status_code)
+              for k in ("content-type", "content-length", "server", "cache-control", "last-modified", "date"):
+                  print(f"  {k}: {r.headers.get(k)}")
+              Path(f"probe/{name}.body").write_bytes(r.content)
+              print("body bytes", len(r.content))
+              print(r.text[:20000] if name.startswith('maaamet') else r.text[:6000])
+          EOF
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: location-forecast-probe
+          path: probe/
+          retention-days: 7
