@@ -223,3 +223,41 @@ def test_min_issue_time_guard(settings: Settings) -> None:
     f = FakeFetcher("aws", set(TEST_STEPS))
     res = ingest(s, ["ifs"], start=ISSUE - dt.timedelta(days=1), end=ISSUE, now=NOW, fetchers=[f])
     assert [r.issue_time_utc for r in res] == ["2026-11-12T06:00:00Z"]
+
+
+# ------------------------------------------------------------------ packing precision
+
+
+def _acc_frame(values: list[float], quanta: list[float]) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "lead_h": list(range(0, 6 * len(values), 6)),
+            "grid_lat_deg": [59.0] * len(values),
+            "grid_lon_deg": [24.0] * len(values),
+            "precip_acc_mm": values,
+            "precip_acc_quantum_mm": quanta,
+        }
+    )
+
+
+def test_accumulation_decrease_within_packing_precision_is_accepted() -> None:
+    from pvt.ingest.ecmwf import _check_accumulation
+
+    # Observed in AIFS 2026-11-12 06 UTC: 22.4375 -> 22.3750 with quanta 0.0625 / 0.125.
+    _check_accumulation(_acc_frame([0.0, 22.4375, 22.375], [0.0, 0.0625, 0.125]))
+
+
+def test_accumulation_decrease_beyond_packing_precision_fails() -> None:
+    from pvt.ingest.ecmwf import IngestError, _check_accumulation
+
+    with pytest.raises(IngestError, match="beyond packing precision"):
+        _check_accumulation(_acc_frame([0.0, 22.4375, 22.25], [0.0, 0.0625, 0.125]))
+
+
+def test_packing_quantum_is_archived(settings: Settings) -> None:
+    _run(settings, FakeFetcher("aws", set(TEST_STEPS)))
+    df = pl.read_parquet(ecmwf_grid_path(settings.data_root, "ifs", ISSUE, "grid"))
+    q = df.group_by("lead_h").agg(pl.col("precip_acc_quantum_mm").first()).sort("lead_h")
+    # step 0 tp is a constant field -> quantum 0; later steps are packed with 24 bits
+    assert q.get_column("precip_acc_quantum_mm")[0] == 0.0
+    assert all(0 < v < 1e-3 for v in q.get_column("precip_acc_quantum_mm")[1:])

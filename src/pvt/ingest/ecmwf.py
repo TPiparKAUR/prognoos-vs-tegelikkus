@@ -306,6 +306,7 @@ def assemble_step_frame(
         cols: dict[str, Any] = {}
         gen_ids = set()
         acc_start = 0
+        acc_quantum = 0.0
         for p in params:
             fld = by_key[(step, p)]
             if not (
@@ -323,6 +324,8 @@ def assemble_step_frame(
             gen_ids.add(fld.gen_proc_id)
             if p == "tp":
                 acc_start = fld.start_step_h
+                _, q = convert(fld.quantity, fld.units, np.array([fld.packing_quantum]))
+                acc_quantum = float(q[0])
         if len(gen_ids) != 1:
             raise IngestError(f"step {step}: mixed generatingProcessIdentifier {gen_ids}")
         n = ref.lat_deg.size
@@ -340,6 +343,7 @@ def assemble_step_frame(
                     "grid_lon_deg": ref.lon_deg,
                     **{c: cols[c] for c in STEP_COLUMNS.values() if c in cols},
                     "precip_acc_start_h": [acc_start] * n,
+                    "precip_acc_quantum_mm": [acc_quantum] * n,
                     "provenance": ["prognoos"] * n,
                     "source_uri": [f"ecmwf-opendata:{relative_key(model, issue, step)}"] * n,
                     "ingest_version": [version] * n,
@@ -578,17 +582,30 @@ def ingest_run(
     return RunResult(model.model_id, format_utc(issue), status, disc.detail, man)
 
 
-def _check_accumulation(df: pl.DataFrame, tol_mm: float = 1e-6) -> None:
-    """Accumulated precipitation must not decrease with lead time (docs/06 section 2)."""
+def _check_accumulation(df: pl.DataFrame, eps_mm: float = 1e-9) -> None:
+    """Accumulated precipitation must not decrease with lead time (docs/06 section 2).
+
+    Decoded GRIB values are exact only to +-quantum/2, and the quantum differs between
+    steps (12-bit packing; observed 0.06-0.25 mm for IFS and AIFS, see reports/stage_1.md).
+    A decrease is therefore an error only if it exceeds (q_prev + q_cur) / 2.
+    """
+    by_point = ["grid_lat_deg", "grid_lon_deg"]
     dec = (
         df.sort("lead_h")
         .with_columns(
-            pl.col("precip_acc_mm").diff().over(["grid_lat_deg", "grid_lon_deg"]).alias("d")
+            pl.col("precip_acc_mm").diff().over(by_point).alias("d"),
+            ((pl.col("precip_acc_quantum_mm") + pl.col("precip_acc_quantum_mm").shift(1)) / 2.0)
+            .over(by_point)
+            .alias("tol"),
         )
-        .filter(pl.col("d") < -tol_mm)
+        .filter(pl.col("d") < -(pl.col("tol") + eps_mm))
     )
     if dec.height:
-        raise IngestError(f"precipitation accumulation decreases at {dec.height} points")
+        worst = dec.select(pl.col("d").min()).item()
+        raise IngestError(
+            f"precipitation accumulation decreases beyond packing precision at {dec.height} "
+            f"points (worst {worst:.4f} mm)"
+        )
 
 
 def make_fetchers(settings: Settings, sources: Sequence[str] | None = None) -> list[Fetcher]:

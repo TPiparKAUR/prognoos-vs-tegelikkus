@@ -73,6 +73,9 @@ class BoxField:
     lat_deg: FloatArray
     lon_deg: FloatArray
     values: FloatArray
+    #: Resolution of the packed values (GRIB units): 2**E * 10**-D; 0 for unpacked or
+    #: constant fields. Decoded values are exact only to +-quantum/2.
+    packing_quantum: float = 0.0
 
 
 @dataclass
@@ -154,6 +157,22 @@ def expected_box_size(area: Area) -> int:
     return nlat * nlon
 
 
+def packing_quantum(gid: int) -> float:
+    """Return the value resolution of a packed GRIB message in its own units.
+
+    For simple/CCSDS packing a decoded value is ``R + k * 2**E * 10**-D`` (integer ``k``),
+    so the quantum is ``2**E * 10**-D``. Constant fields (``bitsPerValue == 0``) and
+    non-quantised packings return 0.
+    """
+    if not eccodes.codes_is_defined(gid, "binaryScaleFactor"):
+        return 0.0
+    if int(eccodes.codes_get(gid, "bitsPerValue")) == 0:
+        return 0.0
+    e = int(eccodes.codes_get(gid, "binaryScaleFactor"))
+    d = int(eccodes.codes_get(gid, "decimalScaleFactor"))
+    return float(2.0**e * 10.0 ** (-d))
+
+
 def _grib_datetime(date: int, time: int) -> dt.datetime:
     return dt.datetime(
         date // 10000, (date // 100) % 100, date % 100, time // 100, time % 100, tzinfo=UTC
@@ -214,6 +233,7 @@ def read_box_fields(path: Path, extractor: BoxExtractor) -> list[BoxField]:
                         lat_deg=lat,
                         lon_deg=lon,
                         values=values,
+                        packing_quantum=packing_quantum(gid),
                     )
                 )
             finally:

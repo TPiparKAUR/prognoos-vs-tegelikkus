@@ -45,6 +45,7 @@ FORECAST_GRID: Final[dict[str, pl.DataType]] = {
     "mslp_hPa": pl.Float64(),
     "precip_acc_mm": pl.Float64(),
     "precip_acc_start_h": pl.Int16(),
+    "precip_acc_quantum_mm": pl.Float64(),
     "provenance": pl.String(),
     "source_uri": pl.String(),
     "ingest_version": pl.String(),
