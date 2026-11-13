@@ -41,7 +41,8 @@ MIN_DAYS_FOR_CI: Final = 10
 N_BOOT: Final = 1000
 
 KEYS: Final = ("issue_time_utc", "lead_h", "station_id", "interp_method", "truth_level")
-GROUP: Final = ("model_id", "variable", "truth_level", "interp_method", "sample")
+GROUP: Final = ("model_id", "variable", "truth_level", "interp_method", "sample", "network")
+# network: "kliima" = verified climate stations; "koik" = all stations incl. XML (ADR-019)
 
 
 @dataclass(frozen=True)
@@ -72,10 +73,13 @@ def _uv(speed: str, direction: str) -> tuple[pl.Expr, pl.Expr]:
 
 def long_errors(pairs: pl.DataFrame) -> pl.DataFrame:
     """One row per pair and variable with ``f``, ``o``, ``err``, ``abs_err``, ``sq_err``."""
+    if "station_class" not in pairs.columns:
+        pairs = pairs.with_columns(pl.lit("kliima").alias("station_class"))
     base = [
         "model_id",
         *KEYS,
         "valid_time_utc",
+        "station_class",
     ]
     persist = pairs.filter(pl.col("model_id") == REFERENCE)
     # Persistence does not depend on the interpolation method: replicate it per method.
@@ -136,10 +140,18 @@ def with_samples(long: pl.DataFrame) -> pl.DataFrame:
         .drop("_m")
     )
     common = long.join(common_keys, on=[*KEYS, "variable"], how="semi")
-    return pl.concat(
+    sampled = pl.concat(
         [
             long.with_columns(pl.lit("all").alias("sample")),
             common.with_columns(pl.lit("common").alias("sample")),
+        ]
+    )
+    return pl.concat(
+        [
+            sampled.filter(pl.col("station_class") == "kliima").with_columns(
+                pl.lit("kliima").alias("network")
+            ),
+            sampled.with_columns(pl.lit("koik").alias("network")),
         ]
     )
 
@@ -163,8 +175,10 @@ def scores_by_lead(long: pl.DataFrame) -> pl.DataFrame:
 
 
 def scores_by_station(long: pl.DataFrame) -> pl.DataFrame:
+    """Per-station scores (network "koik" holds every station once)."""
     return (
-        long.with_columns(lead_bucket(pl.col("lead_h")).alias("lead_bucket"))
+        long.filter(pl.col("network") == "koik")
+        .with_columns(lead_bucket(pl.col("lead_h")).alias("lead_bucket"))
         .filter(pl.col("lead_bucket") != "0")
         .group_by([*GROUP, "station_id", "lead_bucket"])
         .agg(_agg())
@@ -231,8 +245,12 @@ def scores_diff(long: pl.DataFrame) -> pl.DataFrame:
     if c.is_empty():
         return pl.DataFrame()
     wide = (
-        c.select(*KEYS, "variable", "valid_time_utc", "model_id", "abs_err")
-        .pivot(on="model_id", index=[*KEYS, "variable", "valid_time_utc"], values="abs_err")
+        c.select(*KEYS, "variable", "network", "valid_time_utc", "model_id", "abs_err")
+        .pivot(
+            on="model_id",
+            index=[*KEYS, "variable", "network", "valid_time_utc"],
+            values="abs_err",
+        )
         .drop_nulls(list(MODELS))
         .with_columns(
             (pl.col(MODELS[0]) - pl.col(MODELS[1])).alias("d"),
@@ -241,7 +259,9 @@ def scores_diff(long: pl.DataFrame) -> pl.DataFrame:
         .filter(pl.col("lead_bucket") != "0")
     )
     rows = []
-    for key, g in wide.group_by(["variable", "truth_level", "interp_method", "lead_bucket"]):
+    for key, g in wide.group_by(
+        ["variable", "truth_level", "interp_method", "network", "lead_bucket"]
+    ):
         per_day = _per_day(g, "d")
         block = max(7, _bucket_days(str(key[-1])) + 1)
         lo = hi = float("nan")
@@ -254,7 +274,8 @@ def scores_diff(long: pl.DataFrame) -> pl.DataFrame:
                 "variable": key[0],
                 "truth_level": key[1],
                 "interp_method": key[2],
-                "lead_bucket": key[3],
+                "network": key[3],
+                "lead_bucket": key[4],
                 "n": g.height,
                 "n_days": len([d for d in per_day if d.size]),
                 "mae_ifs": mae_a,
@@ -266,7 +287,9 @@ def scores_diff(long: pl.DataFrame) -> pl.DataFrame:
                 "significant": bool(np.isfinite(lo) and (lo > 0 or hi < 0)),
             }
         )
-    return pl.DataFrame(rows).sort(["variable", "truth_level", "interp_method", "lead_bucket"])
+    return pl.DataFrame(rows).sort(
+        ["variable", "truth_level", "interp_method", "network", "lead_bucket"]
+    )
 
 
 def classify(fc_mm: float, bound_mm: float, threshold: float) -> str:

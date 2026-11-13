@@ -14,11 +14,13 @@
   },
   "dependencies": {
     "echarts": "6.1.0",
-    "maplibre-gl": "6.16.0"
+    "ol": "10.11.0",
+    "proj4": "2.22.0"
   },
   "devDependencies": {
     "@turf/bbox-clip": "7.4.0",
     "@turf/simplify": "7.4.0",
+    "@types/proj4": "2.5.6",
     "typescript": "6.0.3",
     "vite": "8.3.5"
   }

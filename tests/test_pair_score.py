@@ -149,3 +149,19 @@ def test_columnar_export_rounds_and_nulls_nan() -> None:
     out = columnar(df)
     assert out["a"] == [1.2346, None]
     assert out["t"] == ["2026-11-10T00:00:00Z"] * 2
+
+
+def test_xml_rows_link_to_climate_station_only_by_wmo_or_name() -> None:
+    from pvt.pair import link_climate_station
+
+    climate = pl.DataFrame({"station_id": ["AJTOOM01"], "name": ["Tooma"], "wmo_code": ["26147"]})
+    x = pl.DataFrame(
+        {
+            "station_id": ["XML_TOOMA", "XML_SOOJAAM", "XML_OTHER"],
+            "kliima_station_id": ["AJTOOM01", "AJTOOM01", None],
+            "station_name": ["Tooma", "Tooma soojaam 1", "Elsewhere"],
+            "wmo_code": ["26147", "00", None],
+        }
+    )
+    out = x.select(link_climate_station(climate).alias("sid"))["sid"].to_list()
+    assert out == ["AJTOOM01", "XML_SOOJAAM", "XML_OTHER"]

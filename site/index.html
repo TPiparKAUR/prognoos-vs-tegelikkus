@@ -6,12 +6,11 @@
     <meta name="color-scheme" content="light dark" />
     <meta
       name="description"
-      content="Eksperimentaalne, mitteametlik võrdlus: ECMWF IFS ja AIFS prognoosid vs KAURi jaamade mõõtmised."
+      content="Eksperimentaalne, mitteametlik võrdlus: ECMWF IFS, AIFS ja KAURi prognoosid vs KAURi jaamade mõõtmised."
     />
     <title>Prognoos vs tegelikkus</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cpath d='M7 21l6-7 5 4 7-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
     <script>
-      // Apply the stored theme before first paint (no flash). Storage may be unavailable.
       try {
         const t = localStorage.getItem("pvt-theme");
         if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
@@ -22,127 +21,145 @@
     <a class="skip" href="#main">Liigu sisu juurde</a>
     <header class="topbar">
       <div class="brand">
-        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
-          <rect width="32" height="32" rx="8" />
-          <path d="M7 21l6-7 5 4 7-9" />
-        </svg>
+        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" /><path d="M7 21l6-7 5 4 7-9" /></svg>
         <div>
           <h1>Prognoos vs tegelikkus</h1>
-          <p class="sub">ECMWF IFS ja AIFS Single KAURi jaamades</p>
+          <p class="sub">Kui täpsed on ilmaprognoosid Eesti ilmajaamades?</p>
         </div>
       </div>
       <p class="badge" role="note">Eksperimentaalne, mitteametlik</p>
       <div class="top-actions">
         <span id="freshness" class="pill" aria-live="polite">Laen andmeid…</span>
-        <button id="theme-toggle" class="icon-btn" type="button" aria-label="Vaheta teemat">
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="Vaheta heledat/tumedat teemat">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z" /></svg>
         </button>
       </div>
     </header>
 
-    <nav class="filters" aria-label="Filtrid">
-      <div class="seg" role="radiogroup" aria-label="Muutuja" id="f-variable"></div>
-      <div class="seg" role="radiogroup" aria-label="Näitaja" id="f-metric"></div>
-      <div class="seg" role="radiogroup" aria-label="Etteanne" id="f-bucket"></div>
-      <label class="sel">
-        <span>Tõde</span>
-        <select id="f-truth"></select>
-      </label>
-      <label class="sel">
-        <span>Interpolatsioon</span>
-        <select id="f-method"></select>
-      </label>
+    <nav class="filters" aria-label="Võrdluse alus">
+      <div class="seg" role="radiogroup" aria-label="Tõde (millega võrreldakse)" id="f-truth"></div>
+      <div class="seg" role="radiogroup" aria-label="Jaamad" id="f-network"></div>
+      <details class="more">
+        <summary>Täpsemalt</summary>
+        <label class="sel"><span>Prognoosi väärtus jaamas</span><select id="f-method"></select></label>
+      </details>
+      <p class="filters-note" id="filters-note"></p>
     </nav>
 
     <main id="main">
-      <section class="kpis" id="kpis" aria-label="Kokkuvõte"></section>
+      <!-- 1. Overall comparison -->
+      <section class="section" aria-labelledby="s1">
+        <div class="section-head">
+          <h2 id="s1"><span class="num">1</span> Milline prognoos on täpseim?</h2>
+          <p class="lead" id="insight"></p>
+        </div>
+        <div class="card">
+          <div id="leaderboard"></div>
+          <p class="hint" id="leaderboard-hint"></p>
+        </div>
+        <div class="tabs" role="tablist" aria-label="Muutuja" id="f-variable"></div>
+        <div class="grid two">
+          <section class="card" aria-labelledby="mae-title">
+            <header class="card-head">
+              <div>
+                <h3 id="mae-title">Keskmine viga (MAE) etteande järgi</h3>
+                <p class="hint" id="mae-hint">Mida madalam, seda täpsem.</p>
+              </div>
+              <button class="ghost" type="button" data-table-toggle="mae">Tabel</button>
+            </header>
+            <div class="chart" id="mae-chart"></div>
+            <div class="table-view" id="mae-table" hidden></div>
+          </section>
+          <section class="card" aria-labelledby="me-title">
+            <header class="card-head">
+              <div>
+                <h3 id="me-title">Süstemaatiline viga (nihe, ME)</h3>
+                <p class="hint" id="me-hint">Üle nulli: prognoos liiga kõrge; alla nulli: liiga madal.</p>
+              </div>
+              <button class="ghost" type="button" data-table-toggle="me">Tabel</button>
+            </header>
+            <div class="chart" id="me-chart"></div>
+            <div class="table-view" id="me-table" hidden></div>
+          </section>
+        </div>
+      </section>
 
-      <div class="grid">
-        <section class="card map-card" aria-labelledby="map-title">
-          <header class="card-head">
-            <div>
-              <h2 id="map-title">Jaamade kaart</h2>
-              <p class="hint" id="map-hint"></p>
+      <!-- 2. Stations -->
+      <section class="section" aria-labelledby="s2">
+        <div class="section-head">
+          <h2 id="s2"><span class="num">2</span> Jaamad: kus on mõni mudel parem?</h2>
+          <p class="lead" id="map-lead"></p>
+        </div>
+        <div class="grid map-grid">
+          <section class="card" aria-label="Kaart">
+            <header class="card-head">
+              <div class="card-tools">
+                <div class="seg small" role="radiogroup" aria-label="Kaardi näitaja" id="f-mapmode"></div>
+                <div class="seg small" role="radiogroup" aria-label="Etteanne" id="f-bucket"></div>
+              </div>
+            </header>
+            <div class="map-wrap">
+              <div id="map" role="region" aria-label="Kaart; sama info on kõrval loendis"></div>
+              <div class="legend" id="map-legend"></div>
             </div>
-            <div class="card-tools">
-              <div class="seg small" role="radiogroup" aria-label="Kaardi mudel" id="f-mapmodel"></div>
-              <button class="ghost" type="button" data-table-toggle="map">Tabel</button>
-            </div>
-          </header>
-          <div class="map-wrap">
-            <div id="map" role="region" aria-label="Kaart jaamadega; sama info on tabelis"></div>
-            <div class="legend" id="map-legend"></div>
-          </div>
-          <div class="table-view" id="map-table" hidden></div>
-        </section>
+          </section>
+          <section class="card list-card" aria-labelledby="list-title">
+            <header class="card-head">
+              <div>
+                <h3 id="list-title">Jaamade loend</h3>
+                <p class="hint" id="list-hint"></p>
+              </div>
+            </header>
+            <input id="station-search" class="search" type="search" placeholder="Otsi jaama…" aria-label="Otsi jaama" />
+            <div class="table-view list" id="station-list"></div>
+          </section>
+        </div>
+      </section>
 
-        <section class="card station-card" id="station" aria-labelledby="station-title">
-          <header class="card-head">
-            <div>
-              <h2 id="station-title">Vali jaam</h2>
-              <p class="hint" id="station-meta">Klõpsa kaardil jaamale või vali tabelist.</p>
-            </div>
-            <div class="card-tools">
-              <div class="seg small" role="radiogroup" aria-label="Jaama muutuja" id="f-stationvar"></div>
-            </div>
-          </header>
-          <div class="chart" id="station-chart"></div>
-          <p class="hint" id="station-foot"></p>
-        </section>
+      <!-- 3. One station -->
+      <section class="section" id="station" aria-labelledby="station-title">
+        <div class="section-head">
+          <h2 id="station-title"><span class="num">3</span> Jaama analüüs</h2>
+          <p class="lead" id="station-meta"></p>
+        </div>
+        <div id="station-notice"></div>
+        <div class="kpis" id="station-kpis"></div>
+        <div class="grid two">
+          <section class="card" aria-labelledby="st-err-title">
+            <header class="card-head">
+              <div>
+                <h3 id="st-err-title">Viga selles jaamas etteande järgi</h3>
+                <p class="hint" id="st-err-hint"></p>
+              </div>
+            </header>
+            <div class="chart" id="st-err-chart"></div>
+          </section>
+          <section class="card" aria-labelledby="st-ts-title">
+            <header class="card-head">
+              <div>
+                <h3 id="st-ts-title">Mõõdetud vs prognoositud</h3>
+                <p class="hint" id="st-ts-hint"></p>
+              </div>
+              <div class="seg small" role="radiogroup" aria-label="Aegrea muutuja" id="f-stationvar"></div>
+            </header>
+            <div class="chart tall" id="st-ts-chart"></div>
+          </section>
+        </div>
+      </section>
 
-        <section class="card wide" aria-labelledby="lead-title">
-          <header class="card-head">
-            <div>
-              <h2 id="lead-title">Täpsus etteande järgi</h2>
-              <p class="hint" id="lead-hint"></p>
-            </div>
-            <div class="card-tools">
-              <button class="ghost" type="button" data-table-toggle="lead">Tabel</button>
-            </div>
-          </header>
-          <div class="chart tall" id="lead-chart"></div>
-          <div class="table-view" id="lead-table" hidden></div>
-        </section>
-
-        <section class="card" aria-labelledby="sc-title">
-          <header class="card-head">
-            <div>
-              <h2 id="sc-title">Scorecard: IFS vs AIFS</h2>
-              <p class="hint">MAE suhteline erinevus ühisel valimil. Sinine = IFS väiksema veaga, punane = AIFS.</p>
-            </div>
-          </header>
-          <div id="scorecard"></div>
-        </section>
-
-        <section class="card" aria-labelledby="pr-title">
-          <header class="card-head">
-            <div>
-              <h2 id="pr-title">24 h sademed</h2>
-              <p class="hint" id="precip-hint"></p>
-            </div>
-            <div class="card-tools">
-              <div class="seg small" role="radiogroup" aria-label="Ööpäeva piir" id="f-window"></div>
-            </div>
-          </header>
-          <div id="precip"></div>
-        </section>
-
-        <section class="card wide" aria-labelledby="status-title">
-          <header class="card-head">
-            <div>
-              <h2 id="status-title">Andmete seis ja metoodika</h2>
-            </div>
-          </header>
+      <!-- 4. Data status -->
+      <section class="section" aria-labelledby="s4">
+        <details class="card details-card">
+          <summary><h2 id="s4"><span class="num">4</span> Andmed, metoodika ja sademete lisaskoorid</h2></summary>
           <div id="status" class="status"></div>
-        </section>
-      </div>
+          <h3 class="sub-h">24 h sademed: kategoorilised skoorid (T2, ööpäev 06–06 UTC)</h3>
+          <div id="precip"></div>
+        </details>
+      </section>
     </main>
 
     <footer class="foot">
-      <p>
-        Eksperimentaalne, mitteametlik. Ei asenda KAURi ametlikku prognoosi ega hoiatusi.
-        Ametlik ilmateenistus: <a href="https://www.ilmateenistus.ee">ilmateenistus.ee</a>.
-      </p>
+      <p>Eksperimentaalne, mitteametlik. Ei asenda KAURi ametlikku prognoosi ega hoiatusi. Ametlik ilmateenistus: <a href="https://www.ilmateenistus.ee">ilmateenistus.ee</a>.</p>
       <p id="attribution"></p>
     </footer>
     <div id="tooltip" class="tooltip" role="tooltip" hidden></div>

@@ -75,15 +75,25 @@ Formaat: kontekst · alternatiivid · poolt/vastu · valik · tagajärjed · all
 - Jaamaväärtused (bilineaarne, lähim, lähim maapunkt; kõrguskorrektsioon; tuule kiirus/suund) on deterministlik funktsioon arhiivist: `pvt.extract.points.load_points()`. Neid ei salvestata eraldi, sest punktifail oli mõõtmisel 2,5× suurem kui toorandmed.
 - Jaamad: 25 kliimajaama (kinnitatud) + vaatluste XML-i lisajaamad (kinnitamata, skooridesse ei lähe).
 
-**ADR-017 KAURi asukohaprognoos (ilmateenistus.ee „asukoha-prognoos") on peamine KAURi võrdlusprognoos** (staatus: ootab andmeallikat)
+**ADR-017 KAURi asukohaprognoos (ilmateenistus.ee „asukoha-prognoos") on peamine KAURi võrdlusprognoos** (staatus: blokeeritud – teenus keeldub automaatsetest päringutest)
 - Kontekst: tellija soovib eelkõige valideerida asukohapõhist prognoosi (tunnipõhine temperatuur, rõhk, tuul, sademed, nähtus). Leht kuvab Highchartsi meteogrammi, mille andmed laaditakse JavaScriptiga.
 - Fakt (2026-11-13, asukohaprognoosi lehe HTML, muutuja `_var["meteogramDataUri"]`): leht laeb andmed JSONP-päringuga `https://ilmmicroservice.envir.ee/api/forecasts/modelForecastByLocation?locationId=<id>&lang=et&coordinates=<lat>;<lon>&showWarnings=1` (`meteogram_loader.js`: `$.getJSON(uri + '&callback=?')`). Tellija lubas teenust selle projekti jaoks pärida.
-- Teadmata: vastuse vorming (väljad, ühikud, ajavöönd, mudeli/jooksu aeg), kas `locationId` on kohustuslik, päringulimiidid. Arenduskeskkonnast katkestas server ühenduse vastuseta; brauseri päiseid ei jäljendata. Parser kirjutatakse alles päris vastuse näidise põhjal.
+- Fakt (13.11.2026): `ilmmicroservice.envir.ee` sulgeb ühenduse vastuseta nii arenduskeskkonnast kui GitHubi runnerilt (töövoog `probe-location-fc`, ka täpselt lehe JSONP-kujul `&callback=`). Brauseri päiseid ega küpsiseid ei jäljendata.
+- Vaja: KAURi IT lubab projekti kliendi (User-Agent `prognoos-vs-tegelikkus/…`, GitHub Actions) või annab ametliku ligipääsu; parseri jaoks vastuse näidis. Lehel on KAURi asukohaprognoos olemas „ootel" mudelina.
 - Plaan: hetktõmmis igal jooksul jaamade koordinaatidel, toorvastus + Parquet ainult muutusel; skoorid ainult sisevaates kuni avaldamisotsuseni (ADR-012).
 
-**ADR-018 Veebileht: Vite + TypeScript, MapLibre GL JS, ECharts; saidiga kaasas aluskaart** (staatus: teostatud 2026-11-13, tellija soov „võimalikult kaasaegne")
-- Valik: staatiline leht (ADR-011) – Vite 8 + TypeScript (strict, raamistikuta), MapLibre GL JS 6 kaardile, ECharts 6 (SVG-renderdaja, üks diagrammiteek kogu saidil, docs/05 §3). Andmed eelarvutatud JSON-ina (`pvt build-site`), kogu vaade on URL-is jagatav.
-- Aluskaart: OSM-põhine vektorkaart (`@geo-maps` 0.6.0, ODbL), lõigatud Eesti ümbrusele (232 KB) ja saidiga kaasas – kolmanda osapoole kaardiserverit pole, külastaja IP ei lähe kaardipakkujale (docs/03 §8). Maa- ja Ruumiameti aluskaarti ei kasutatud, sest selle teenuseaadressi ja kasutustingimusi ei kontrollitud.
-- Värvid: dataviz-viitepalett (valideeritud CVD-ohutuks heledas ja tumedas): IFS sinine, AIFS oranž, persistents hall katkendjoon (referents, mitte kategooria), vaatlus põhitint; nihe sinine↔punane hallikas keskpunktis, MAE ühe tooniga skaala.
-- Avaldamine: GitHub Pages töövoost `site.yml` (2× ööpäevas pärast kliimaandmeid + push'il). **Leht on avalik** (avalik repo) – sisaldab ainult avaandmetest tuletatud ECMWF-i skoore; KAURi prognoosi skoore ei avaldata (ADR-012).
-- Muudaks: sisemise GitLab Pages'i kasutuselevõtt (sama `dist/` töötab suhtelise baasiga muutmata).
+**ADR-018 Veebileht: Vite + TypeScript, OpenLayers (EPSG:3301), ECharts; Maa- ja Ruumiameti hallkaart** (staatus: teostatud; muudetud 2026-11-13 tellija soovil)
+- Ülesehitus (tellija: „lihtsusta; alguses üldine võrdlus, siis analüüs jaama kohta"): 1) võitjatabel muutuja × etteanne + MAE ja nihe (ME) etteande järgi; 2) kaart ja jaamade loend „kumb mudel on täpsem"; 3) jaama analüüs (viga etteande järgi, mõõdetud vs prognoositud); 4) andmed ja metoodika. Kogu vaade on URL-is; tundmatud või andmeteta valikud lingis asendatakse vaikeväärtusega.
+- Aluskaart: **Maa- ja Ruumiameti hallkaart** `https://kaart.maaamet.ee/wms/hallkaart`, kiht `kaart_ht` (GetCapabilities 13.11.2026: ainult EPSG:3301, tasuta, AccessConstraints none). Seetõttu on kaardivaade L-EST97-s ja teek OpenLayers (MapLibre vajab EPSG:3857). WMS-i pärib külastaja brauser – külastaja IP jõuab Maa- ja Ruumiametisse. Saidiga kaasas OSM-i kontuur (ODbL) on varuaba, kui WMS ei vasta.
+- Värvid: IFS sinine, AIFS oranž, KAUR asukohaprognoos aqua (slot 3), persistents hall katkendjoon; kaardil „kumb parem" sinine↔oranž hallikas keskpunktis (värv = mudeli identiteet).
+
+**ADR-012 (muudetud 2026-11-13) KAURi prognoosi skoorid avalikul lehel** (staatus: tellija otsus)
+- Tellija otsustas, et KAURi asukohaprognoosi võrdlus (IFS vs AIFS vs KAUR) on avalikul lehel. Leht kannab märgistust „Eksperimentaalne, mitteametlik".
+
+**ADR-019 XML-i vaatlusjaamad analüüsis** (staatus: tellija otsus 2026-11-13)
+- Kontekst: tellija soovib kasutada ka jaamu, kus mõõdetakse vaid osa suurusi (nt ainult tuul või temperatuur). docs/08 välistas kinnitamata jaamad skooridest.
+- Valik: vaatluste XML-i jaamad (koordinaadid KAURi XML-ist; > 1 km kliimajaamast) on analüüsis **ainult T1-ga** ja eraldi võrgustikuna („Kõik vaatlusjaamad"); kliimajaamade koondtulemus jääb eraldi. Kõrgus on teadmata → temperatuur ilma kõrguskorrektsioonita (`t2m_nocorr`), XML-i rõhku ei võrrelda.
+- XML-i kirje seotakse kliimajaamaga ainult siis, kui WMO-kood või nimi ühtib (mitte ainult kauguse järgi: nt „Tooma soojaam 1–4" samades koordinaatides kui Tooma).
+
+**ADR-020 Varuajasti** (staatus: tellija kinnitas 2026-11-13)
+- Fakt: GitHub ei käivitanud selle repo `schedule`-sündmusi kordagi (vana ja uue vaikeharu peal). Töövoog `scheduler.yml` käivitab ingesti ise (`workflow_dispatch`): XML iga 10 min, ECMWF iga 2 h, kliima ja leht 2× ööpäevas; jookseb ~5,8 h ja käivitab end uuesti. Peatamine: töövoo keelamine. Tavalised cron'id jäävad alles.

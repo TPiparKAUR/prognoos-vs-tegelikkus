@@ -1,62 +1,131 @@
 import "./style.css";
+import proj4 from "proj4";
 import {
   loadSite,
   loadStationSeries,
   type BucketScore,
   type Columnar,
+  type LeadScore,
   type SiteData,
   type StationFeature,
   type StationScore,
 } from "./data";
-import { cssVar, h, hoursAgo, local, num, pct, signed } from "./format";
+import { cssVar, h, hoursAgo, local, num, signed } from "./format";
 import { createMap, type MapPoint, type StationMap } from "./map";
-import { clearChart, leadChart, stationChart, type SeriesSpec } from "./charts";
-import { diverging, isDark, niceMax, quantile, sequential, type Scale } from "./scales";
+import { barChart, clearChart, leadChart, stationChart, type BarSeries, type SeriesSpec } from "./charts";
+import { isDark, niceMax, quantile, sequential, type Scale } from "./scales";
 import * as store from "./state";
-import type { MapModel, Metric, State, StationVar } from "./state";
+import type { MapMode, State, StationVar } from "./state";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-const MODELS = ["ifs", "aifs-single"] as const;
-const SHORT: Record<string, string> = { ifs: "IFS", "aifs-single": "AIFS", persistence: "Persistents" };
-const METRICS: Record<Metric, string> = { mae: "MAE", me: "ME (nihe)", rmse: "RMSE" };
-const VAR_TABS: [string, string][] = [
+// Forecast competitors (order = categorical slot order) and the reference.
+const COMPETITORS = ["ifs", "aifs-single", "kaur_asukoht"] as const;
+const REF = "persistence";
+const SHORT: Record<string, string> = {
+  ifs: "IFS",
+  "aifs-single": "AIFS",
+  kaur_asukoht: "KAUR asukoht",
+  persistence: "Persistents",
+};
+const VARS: [string, string][] = [
   ["t2m", "Temperatuur"],
   ["wind_speed", "Tuule kiirus"],
   ["wind_dir", "Tuule suund"],
-  ["wind_vec", "Tuulevektor"],
-  ["mslp", "Rõhk"],
+  ["mslp", "Õhurõhk"],
 ];
 const BUCKET_LABEL: Record<string, string> = {
   D1: "1. päev",
   D2: "2. päev",
   D3: "3. päev",
-  "D4-5": "4.–5. p",
-  "D6-10": "6.–10. p",
-  "D11-15": "11.–15. p",
+  "D4-5": "4.–5. päev",
+  "D6-10": "6.–10. päev",
+  "D11-15": "11.–15. päev",
 };
-const MIN_N_MAP = 20; // fewer pairs -> hollow symbol (docs/05 §1)
+const MIN_N_RELIABLE = 100;
 
-const seriesColor = (m: string) =>
-  m === "ifs" ? cssVar("--series-ifs") : m === "aifs-single" ? cssVar("--series-aifs") : cssVar("--series-ref");
+const colorOf = (m: string): string =>
+  m === "ifs"
+    ? cssVar("--series-ifs")
+    : m === "aifs-single"
+      ? cssVar("--series-aifs")
+      : m === "kaur_asukoht"
+        ? cssVar("--series-kaur")
+        : cssVar("--series-ref");
 
 let data: SiteData;
 let map: StationMap;
 const stationsById = new Map<string, StationFeature>();
 
-// ---------- segmented controls ----------
+// ---------------------------------------------------------------- helpers
+function unitOf(variable: string): string {
+  return data.meta.variables[variable]?.unit ?? (variable === "precip" ? "mm" : "");
+}
+
+/** Temperature without height correction where heights are unknown (XML stations). */
+function effVar(variable: string, network: string): string {
+  return variable === "t2m" && network === "koik" ? "t2m_nocorr" : variable;
+}
+
+function stationVar(variable: string, cls: "kliima" | "xml"): string {
+  return variable === "t2m" && cls === "xml" ? "t2m_nocorr" : variable;
+}
+
+function bucketRows(s: State, variable: string): BucketScore[] {
+  const v = effVar(variable, s.network);
+  return data.bucket.filter(
+    (r) =>
+      r.variable === v &&
+      r.truth_level === s.truth &&
+      r.interp_method === s.method &&
+      r.network === s.network &&
+      r.sample === "common",
+  );
+}
+
+function leadRows(s: State, variable: string): LeadScore[] {
+  const v = effVar(variable, s.network);
+  return data.lead.filter(
+    (r) =>
+      r.variable === v &&
+      r.truth_level === s.truth &&
+      r.interp_method === s.method &&
+      r.network === s.network &&
+      r.sample === "common" &&
+      r.lead_h > 0,
+  );
+}
+
+function fmt(v: number | null | undefined, variable: string): string {
+  return num(v, variable === "wind_dir" ? 0 : variable === "mslp" ? 2 : 2);
+}
+
+function keyLine(model: string): HTMLElement {
+  return h("span", {
+    class: `key-line${model === REF ? " dashed" : ""}`,
+    style: `border-color:${colorOf(model)}`,
+    "aria-hidden": "true",
+  });
+}
+
+function emptyBox(text: string): HTMLElement {
+  return h("p", { class: "empty" }, text);
+}
+
+// ---------------------------------------------------------------- controls
 function segmented(el: HTMLElement, options: [string, string][], key: keyof State): void {
   el.replaceChildren(
     ...options.map(([value, label]) => {
       const b = h("button", { type: "button", role: "radio", "data-value": value }, label);
-      b.addEventListener("click", () => store.set({ [key]: value } as Partial<State>));
+      b.addEventListener("click", () => {
+        if (!b.disabled) store.set({ [key]: value } as Partial<State>);
+      });
       return b;
     }),
   );
-  // Arrow-key navigation inside the radio group.
   el.addEventListener("keydown", (e) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-    const btns = [...el.querySelectorAll<HTMLButtonElement>("button")];
+    const btns = [...el.querySelectorAll<HTMLButtonElement>("button:not([disabled])")];
     const i = btns.findIndex((b) => b.getAttribute("aria-checked") === "true");
     const next = btns[(i + (e.key === "ArrowRight" ? 1 : btns.length - 1)) % btns.length];
     next?.click();
@@ -64,102 +133,281 @@ function segmented(el: HTMLElement, options: [string, string][], key: keyof Stat
   });
 }
 
-function syncSegmented(el: HTMLElement, value: string): void {
+function syncSegmented(el: HTMLElement, value: string, disabled: Set<string> = new Set()): void {
   for (const b of el.querySelectorAll<HTMLButtonElement>("button")) {
-    const on = b.dataset.value === value;
+    const v = b.dataset.value ?? "";
+    const on = v === value;
     b.setAttribute("aria-checked", String(on));
     b.tabIndex = on ? 0 : -1;
+    b.disabled = disabled.has(v);
   }
 }
 
-function fillSelect(el: HTMLSelectElement, options: [string, string][], key: keyof State): void {
-  el.replaceChildren(...options.map(([v, l]) => h("option", { value: v }, l)));
-  el.addEventListener("change", () => store.set({ [key]: el.value } as Partial<State>));
-}
-
-// ---------- helpers ----------
-function unitOf(variable: string): string {
-  return data.meta.variables[variable]?.unit ?? "";
-}
-
-function metricValue(r: { me: number | null; mae: number | null; rmse: number | null }, m: Metric): number | null {
-  return r[m];
-}
-
-function bucketRows(s: State, sample = "common"): BucketScore[] {
-  return data.bucket.filter(
-    (r) =>
-      r.variable === s.variable &&
-      r.truth_level === s.truth &&
-      r.interp_method === s.method &&
-      r.sample === sample &&
-      r.lead_bucket === s.bucket,
+function tabs(el: HTMLElement, options: [string, string][], key: keyof State): void {
+  el.replaceChildren(
+    ...options.map(([value, label]) => {
+      const b = h("button", { type: "button", role: "tab", "data-value": value }, label);
+      b.addEventListener("click", () => store.set({ [key]: value } as Partial<State>));
+      return b;
+    }),
   );
 }
 
-// ---------- KPIs ----------
-function renderKpis(s: State): void {
-  const el = $("kpis");
-  const br = bucketRows(s);
-  const unit = unitOf(s.variable);
-  const get = (m: string) => br.find((r) => r.model_id === m);
-  const tiles: HTMLElement[] = [];
-  for (const m of [...MODELS, "persistence"]) {
-    const r = get(m);
-    const v = r ? metricValue(r, s.metric) : null;
-    const ci =
-      r && s.metric === "mae" && r.mae_ci_low !== null
-        ? `95 % CI ${num(r.mae_ci_low, 2)}…${num(r.mae_ci_high, 2)}`
-        : "CI alates 10 päevast";
-    tiles.push(
-      h(
-        "div",
-        { class: "kpi" },
-        h(
-          "div",
-          { class: "k-label" },
-          h("span", {
-            class: `key-line${m === "persistence" ? " dashed" : ""}`,
-            style: `border-color:${seriesColor(m)}`,
-          }),
-          `${METRICS[s.metric]} · ${data.meta.models[m] ?? m}`,
-        ),
-        h("div", { class: "k-value" }, s.metric === "me" ? signed(v, 2) : num(v, 2), h("span", { class: "k-unit" }, unit)),
-        h("div", { class: "k-foot" }, r ? `n = ${r.n.toLocaleString("et-EE")} · ${r.n_days} päeva · ${ci}` : "andmed puuduvad"),
-      ),
-    );
+function syncTabs(el: HTMLElement, value: string): void {
+  for (const b of el.querySelectorAll<HTMLButtonElement>("button")) {
+    b.setAttribute("aria-selected", String(b.dataset.value === value));
   }
-  const ifs = get("ifs");
-  const aifs = get("aifs-single");
-  const ss = (r?: BucketScore) => (r?.ss_mae_persistence ?? null);
-  tiles.push(
+}
+
+const fold = (t: string) =>
+  t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+
+/** Old links may carry the XML id of a climate station (e.g. XML_KUUSIKU_58973_...). */
+function resolveOldId(id: string): string | null {
+  const m = /^XML_(.+?)_\d{5}_\d{5}/.exec(id);
+  if (!m) return null;
+  for (const f of data.stations.features) {
+    if (f.properties.class === "kliima" && fold(f.properties.name) === m[1]) return f.properties.id;
+  }
+  return null;
+}
+
+/** Make a shared link safe: unknown values fall back to defaults. */
+function sanitize(s: State): State {
+  const out = { ...s };
+  if (!(out.truth in data.meta.truth_levels) || !(out.truth in data.meta.availability)) {
+    out.truth = store.DEFAULTS.truth;
+  }
+  if (!(out.network in data.meta.networks)) out.network = store.DEFAULTS.network;
+  if (out.truth === "T2") out.network = "kliima"; // XML stations have no T2
+  if (!(out.method in data.meta.methods)) out.method = store.DEFAULTS.method;
+  if (!VARS.some(([v]) => v === out.variable)) out.variable = store.DEFAULTS.variable;
+  if (!data.meta.lead_buckets.includes(out.bucket)) out.bucket = store.DEFAULTS.bucket;
+  if (!["better", "ifs", "aifs-single"].includes(out.mapMode)) out.mapMode = "better";
+  if (!["t2m", "wind", "mslp", "precip"].includes(out.stationVar)) out.stationVar = "t2m";
+  if (out.station && !stationsById.has(out.station)) out.station = resolveOldId(out.station);
+  if (!out.station && stationsById.has("AJHARK01")) out.station = "AJHARK01";
+  return out;
+}
+
+function syncControls(s: State): void {
+  const t1 = Object.keys(data.meta.availability).includes("T1");
+  syncSegmented($("f-truth"), s.truth, t1 ? new Set() : new Set(["T1"]));
+  syncSegmented($("f-network"), s.network, s.truth === "T2" ? new Set(["koik"]) : new Set());
+  $<HTMLSelectElement>("f-method").value = s.method;
+  syncTabs($("f-variable"), s.variable);
+  syncSegmented($("f-mapmode"), s.mapMode);
+  syncSegmented($("f-bucket"), s.bucket);
+  syncSegmented($("f-stationvar"), s.stationVar);
+  const notes: string[] = [];
+  if (!t1) notes.push("T1 (toormõõtmine) paarid alles kogunevad – esimesed tekivad tunni-ajastuse käivitumisel.");
+  if (s.truth === "T2") notes.push("T2 on ainult kliimajaamades; kõik vaatlusjaamad on valitavad T1 korral.");
+  if (s.network === "koik") notes.push("Kõigi jaamade korral on temperatuur ilma kõrguskorrektsioonita (XML-jaamade kõrgus pole teada).");
+  $("filters-note").textContent = notes.join(" ");
+}
+
+// ---------------------------------------------------------------- 1. leaderboard
+interface Cell {
+  winner: string | null;
+  values: Record<string, { mae: number | null; n: number }>;
+}
+
+function leaderCell(s: State, variable: string, bucket: string): Cell {
+  const values: Cell["values"] = {};
+  if (variable === "precip") {
+    if (s.truth !== "T2") return { winner: null, values };
+    for (const r of data.precip) {
+      if (r.interp_method === s.method && r.window === "06-06" && r.lead_bucket === bucket && r.threshold_mm === data.meta.precip_thresholds_mm[0]) {
+        values[r.model_id] = { mae: r.mae, n: r.n };
+      }
+    }
+  } else {
+    for (const r of bucketRows(s, variable)) {
+      if (r.lead_bucket === bucket) values[r.model_id] = { mae: r.mae, n: r.n };
+    }
+  }
+  let winner: string | null = null;
+  for (const m of COMPETITORS) {
+    const v = values[m]?.mae;
+    if (v === null || v === undefined) continue;
+    if (winner === null || v < (values[winner]?.mae ?? Infinity)) winner = m;
+  }
+  return { winner, values };
+}
+
+function renderLeaderboard(s: State): void {
+  const el = $("leaderboard");
+  const buckets = data.meta.lead_buckets;
+  const rowsDef: [string, string][] = [...VARS, ["precip", "24 h sademed"]];
+  const wins: Record<string, Record<string, number>> = {};
+  let anyData = false;
+  const body = rowsDef.map(([v, label]) => {
+    const isPrecip = v === "precip";
+    const tr = h(
+      "tr",
+      { class: isPrecip ? "" : "clickable", "aria-selected": String(v === s.variable) },
+      h("th", { scope: "row" }, label, h("span", { class: "unit" }, ` ${unitOf(v)}`)),
+    );
+    for (const b of buckets) {
+      const c = leaderCell(s, v, b);
+      if (!c.winner) {
+        tr.append(h("td", { class: "lb-cell none" }, "–"));
+        continue;
+      }
+      anyData = true;
+      (wins[v] ??= {})[c.winner] = (wins[v]?.[c.winner] ?? 0) + 1;
+      const best = c.values[c.winner];
+      const others = COMPETITORS.filter((m) => m !== c.winner && c.values[m]?.mae != null);
+      const second = others[0] ? c.values[others[0]]?.mae ?? null : null;
+      const rel = best?.mae && second ? (second - best.mae) / best.mae : null;
+      const ref = c.values[REF]?.mae ?? null;
+      const refBetter = ref !== null && best?.mae != null && ref < best.mae;
+      const few = (best?.n ?? 0) < MIN_N_RELIABLE;
+      const title = [
+        ...[...COMPETITORS, REF]
+          .filter((m) => c.values[m])
+          .map((m) => `${SHORT[m]}: MAE ${fmt(c.values[m]?.mae, v)} ${unitOf(v)} (n = ${c.values[m]?.n})`),
+        few ? "Vähe paare – tulemus on esialgne." : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      tr.append(
+        h(
+          "td",
+          { class: `lb-cell${few ? " few" : ""}`, title },
+          h("span", { class: "lb-win" }, keyLine(c.winner), SHORT[c.winner] ?? c.winner),
+          h("span", { class: "lb-val" }, fmt(best?.mae, v)),
+          rel !== null ? h("span", { class: "lb-rel" }, `teine +${num(rel * 100, 0)} %`) : null,
+          refBetter ? h("span", { class: "lb-warn" }, "persistents parem") : null,
+        ),
+      );
+    }
+    if (!isPrecip) {
+      const pick = () => {
+        store.set({ variable: v });
+        document.getElementById("f-variable")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      };
+      tr.addEventListener("click", pick);
+      tr.tabIndex = 0;
+      tr.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") pick();
+      });
+    }
+    return tr;
+  });
+  if (!anyData) {
+    el.replaceChildren(emptyBox(`Valitud tõe (${s.truth}) ja jaamade jaoks pole veel paare.`));
+    $("insight").textContent = "";
+    $("leaderboard-hint").textContent = "";
+    return;
+  }
+  el.replaceChildren(
     h(
       "div",
-      { class: "kpi" },
-      h("div", { class: "k-label" }, "MAE oskus persistentsi suhtes"),
+      { class: "table-view lb", style: "max-height:none" },
       h(
-        "div",
-        { class: "k-value" },
-        `${pct(ss(ifs))}`,
-        h("span", { class: "k-unit" }, `IFS · ${pct(ss(aifs))} AIFS`),
+        "table",
+        {},
+        h(
+          "thead",
+          {},
+          h("tr", {}, h("th", {}, "Muutuja"), ...buckets.map((b) => h("th", { class: "c" }, BUCKET_LABEL[b] ?? b))),
+        ),
+        h("tbody", {}, ...body),
       ),
-      h("div", { class: "k-foot" }, "1 − MAE / MAE(persistents); 0 = mitte parem kui eilne ilm"),
     ),
   );
-  el.replaceChildren(...tiles);
+  // Automatic plain-language summary.
+  const parts: string[] = [];
+  for (const [v, label] of rowsDef) {
+    const w = wins[v];
+    if (!w) continue;
+    const total = Object.values(w).reduce((a, b) => a + b, 0);
+    const [top, k] = Object.entries(w).sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
+    parts.push(k === total ? `${label.toLowerCase()}: ${SHORT[top]} kõigis ${total} vahemikus` : `${label.toLowerCase()}: ${SHORT[top]} ${k}/${total}`);
+  }
+  const p = data.meta.period;
+  $("insight").textContent =
+    `Võitja ehk väikseim keskmine viga (MAE) ${p.n_days} päeva andmetel – ${parts.join("; ")}. ` +
+    (p.n_days < 30 ? "Andmeid on veel vähe: erinevused on esialgsed ja statistiliselt kontrollimata (vaja ≥ 30 päeva)." : "");
+  const pend = Object.keys(data.meta.pending_models);
+  $("leaderboard-hint").textContent =
+    `Lahtris: kõige väiksema veaga prognoos, selle MAE ja kui palju suurem on teise viga. „Persistents parem“: eilne vaatlus oli täpsem. Hall = vähem kui ${MIN_N_RELIABLE} paari. ` +
+    (pend.length ? `Ootel: ${pend.map((m) => SHORT[m]).join(", ")} (andmeallikas pole veel kättesaadav, vt jaotis 4). ` : "") +
+    "Klõpsa real, et näha graafikuid.";
 }
 
-// ---------- map ----------
-function stationScores(s: State): Map<string, StationScore[]> {
+// ---------------------------------------------------------------- 1b. lead charts
+function renderLeadCharts(s: State): void {
+  const unit = unitOf(s.variable);
+  const sel = leadRows(s, s.variable);
+  const models = [...COMPETITORS, REF].filter((m) => sel.some((r) => r.model_id === m));
+  for (const [metric, chartId, tableId] of [
+    ["mae", "mae-chart", "mae-table"],
+    ["me", "me-chart", "me-table"],
+  ] as const) {
+    const el = $(chartId);
+    const series: SeriesSpec[] = models
+      .filter((m) => !(metric === "me" && (s.variable === "wind_dir" || m === REF)))
+      .map((m) => ({
+        key: m,
+        name: SHORT[m] ?? m,
+        color: colorOf(m),
+        dashed: m === REF,
+        points: sel
+          .filter((r) => r.model_id === m)
+          .sort((a, b) => a.lead_h - b.lead_h)
+          .map((r) => [r.lead_h, r[metric]] as [number, number | null]),
+      }));
+    if (!series.some((x) => x.points.length)) {
+      clearChart(el, "Selle valiku jaoks paare veel pole");
+    } else {
+      leadChart(el, series, unit, metric === "me");
+    }
+    const tbl = $(tableId);
+    if (!tbl.hidden) {
+      const leads = [...new Set(sel.map((r) => r.lead_h))].sort((a, b) => a - b);
+      tbl.replaceChildren(
+        h(
+          "table",
+          {},
+          h("thead", {}, h("tr", {}, h("th", {}, "Etteanne, h"), ...series.map((x) => h("th", {}, `${x.name}, ${unit}`)), h("th", {}, "n"))),
+          h(
+            "tbody",
+            {},
+            ...leads.map((L) => {
+              const rs = sel.filter((r) => r.lead_h === L);
+              return h(
+                "tr",
+                {},
+                h("td", {}, String(L)),
+                ...series.map((x) => {
+                  const v = rs.find((q) => q.model_id === x.key)?.[metric];
+                  return h("td", {}, metric === "me" ? signed(v ?? null, 2) : fmt(v, s.variable));
+                }),
+                h("td", { class: "muted" }, String(rs[0]?.n ?? "")),
+              );
+            }),
+          ),
+        ),
+      );
+    }
+  }
+  const label = data.meta.variables[effVar(s.variable, s.network)]?.label ?? s.variable;
+  $("mae-hint").textContent = `${label}, ${unit}. Mida madalam, seda täpsem. Katkendjoon: persistents (eilne vaatlus) – prognoos peab olema sellest parem.`;
+  $("me-hint").textContent =
+    s.variable === "wind_dir"
+      ? "Tuule suuna nihet ei arvutata (ringsuurus); vaata MAE-d."
+      : `${label}, ${unit}. Üle nulli: prognoos keskmiselt liiga kõrge; alla nulli: liiga madal.`;
+}
+
+// ---------------------------------------------------------------- 2. map + list
+function stationScoreRows(s: State): Map<string, StationScore[]> {
   const out = new Map<string, StationScore[]>();
   for (const r of data.station) {
-    if (
-      r.variable !== s.variable ||
-      r.truth_level !== s.truth ||
-      r.interp_method !== s.method ||
-      r.lead_bucket !== s.bucket
-    )
-      continue;
+    if (r.truth_level !== s.truth || r.interp_method !== s.method || r.lead_bucket !== s.bucket) continue;
+    const f = stationsById.get(r.station_id);
+    if (!f || r.variable !== stationVar(s.variable, f.properties.class)) continue;
     const list = out.get(r.station_id) ?? [];
     list.push(r);
     out.set(r.station_id, list);
@@ -167,122 +415,135 @@ function stationScores(s: State): Map<string, StationScore[]> {
   return out;
 }
 
-function mapValue(list: StationScore[] | undefined, s: State): { v: number | null; n: number } {
+function mapValue(list: StationScore[] | undefined, mode: MapMode): { v: number | null; n: number } {
   if (!list) return { v: null, n: 0 };
   const by = (m: string) => list.find((r) => r.model_id === m);
-  if (s.mapModel === "diff") {
+  if (mode === "better") {
     const a = by("ifs");
     const b = by("aifs-single");
-    const va = a ? metricValue(a, s.metric) : null;
-    const vb = b ? metricValue(b, s.metric) : null;
-    if (va === null || vb === null) return { v: null, n: 0 };
-    const v = s.metric === "me" ? Math.abs(va) - Math.abs(vb) : va - vb;
-    return { v, n: Math.min(a?.n ?? 0, b?.n ?? 0) };
+    if (a?.mae == null || b?.mae == null) return { v: null, n: 0 };
+    return { v: a.mae - b.mae, n: Math.min(a.n, b.n) };
   }
-  const r = by(s.mapModel);
-  return { v: r ? metricValue(r, s.metric) : null, n: r?.n ?? 0 };
+  const r = by(mode);
+  return { v: r?.mae ?? null, n: r?.n ?? 0 };
 }
 
-function renderMap(s: State): void {
-  const scores = stationScores(s);
-  const values: number[] = [];
-  const pts: { f: StationFeature; v: number | null; n: number }[] = [];
-  for (const f of data.stations.features) {
-    const { v, n } = f.properties.verified ? mapValue(scores.get(f.properties.id), s) : { v: null, n: 0 };
-    if (v !== null) values.push(v);
-    pts.push({ f, v, n });
-  }
-  const useDiv = s.metric === "me" || s.mapModel === "diff";
-  const scale = useDiv
-    ? diverging(niceMax(quantile(values.map(Math.abs), 0.95)))
-    : sequential(niceMax(quantile(values, 0.95)));
-  const maxN = Math.max(1, ...pts.map((p) => p.n));
-  const points: MapPoint[] = pts.map(({ f, v, n }) => ({
+// Diverging blue (IFS better) <-> orange (AIFS better), gray midpoint.
+function betterScale(absMax: number): Scale {
+  const light = ["#184f95", "#3987e5", "#9ec5f4", "#e6e5e0", "#f6bc9f", "#eb6834", "#a8441b"];
+  const dark = ["#6da7ec", "#3987e5", "#1c5cab", "#3a3a37", "#8a3a17", "#d95926", "#f0a27f"];
+  const stops = isDark() ? dark : light;
+  const m = absMax > 0 ? absMax : 1;
+  const lerp = (t: number) => {
+    const x = Math.min(1, Math.max(0, t)) * (stops.length - 1);
+    const i = Math.min(stops.length - 2, Math.floor(x));
+    const f = x - i;
+    const pa = parseInt((stops[i] as string).slice(1), 16);
+    const pb = parseInt((stops[i + 1] as string).slice(1), 16);
+    const ch = (sh: number) => Math.round(((pa >> sh) & 255) + ((((pb >> sh) & 255) - ((pa >> sh) & 255)) * f));
+    return `rgb(${ch(16)}, ${ch(8)}, ${ch(0)})`;
+  };
+  return { kind: "div", min: -m, max: m, stops, color: (v) => lerp((v + m) / (2 * m)) };
+}
+
+let lastMapRows = new Map<string, StationScore[]>();
+
+function renderMapAndList(s: State): void {
+  const scores = stationScoreRows(s);
+  lastMapRows = scores;
+  const vals: { f: StationFeature; v: number | null; n: number }[] = data.stations.features.map((f) => ({
+    f,
+    ...mapValue(scores.get(f.properties.id), s.mapMode),
+  }));
+  const finite = vals.map((x) => x.v).filter((v): v is number => v !== null);
+  const scale =
+    s.mapMode === "better"
+      ? betterScale(niceMax(quantile(finite.map(Math.abs), 0.9)))
+      : sequential(niceMax(quantile(finite, 0.95)));
+  const points: MapPoint[] = vals.map(({ f, v }) => ({
     id: f.properties.id,
-    name: f.properties.name,
     lon: f.geometry.coordinates[0],
     lat: f.geometry.coordinates[1],
-    verified: f.properties.verified,
+    kind: f.properties.class,
     color: v === null ? null : scale.color(v),
-    radius: 6 + 5 * Math.sqrt(n / maxN),
-    hollow: n < MIN_N_MAP,
+    radius: f.properties.class === "kliima" ? 8 : 5.5,
   }));
   map.update(points, s.station);
-  renderLegend(s, scale);
+  // Legend
   const unit = unitOf(s.variable);
-  const what =
-    s.mapModel === "diff"
-      ? `${METRICS[s.metric]} IFS − AIFS${s.metric === "me" ? " (|ME| vahe)" : ""}`
-      : `${METRICS[s.metric]} · ${SHORT[s.mapModel]}`;
-  $("map-hint").textContent = `${what}, ${unit} · ${BUCKET_LABEL[s.bucket] ?? s.bucket} · ${data.meta.methods[s.method] ?? s.method}. Sümboli suurus = paaride arv; õõnes = alla ${MIN_N_MAP}.`;
-  renderMapTable(s, scores);
-}
-
-function renderLegend(s: State, scale: Scale): void {
-  const unit = unitOf(s.variable);
-  const el = $("map-legend");
   const grad = `linear-gradient(90deg, ${scale.stops.join(",")})`;
-  const ticks =
-    scale.kind === "div"
-      ? [signed(scale.min, 1), "0", signed(scale.max, 1)]
-      : [num(0, 1), num(scale.max / 2, 1), num(scale.max, 1)];
-  const labels =
-    s.mapModel === "diff"
-      ? ["IFS parem", "AIFS parem"]
-      : s.metric === "me"
-        ? ["prognoos liiga madal", "liiga kõrge"]
-        : ["väike viga", "suur viga"];
-  el.replaceChildren(
-    h("div", {}, h("strong", {}, `${METRICS[s.metric]}${s.mapModel === "diff" ? " IFS − AIFS" : ""}, ${unit}`)),
+  const legend = $("map-legend");
+  legend.replaceChildren(
+    h("div", {}, h("strong", {}, s.mapMode === "better" ? `Kumb mudel on täpsem? (MAE vahe, ${unit})` : `${SHORT[s.mapMode]} keskmine viga (MAE), ${unit}`)),
     h("div", { class: "ramp", style: `background:${grad}` }),
-    h("div", { class: "ticks" }, ...ticks.map((t) => h("span", {}, t))),
-    h("div", { class: "ticks muted" }, h("span", {}, labels[0] ?? ""), h("span", {}, labels[1] ?? "")),
+    s.mapMode === "better"
+      ? h("div", { class: "ticks" }, h("span", {}, `IFS parem ${num(scale.max, 1)}`), h("span", {}, "võrdne"), h("span", {}, `AIFS parem ${num(scale.max, 1)}`))
+      : h("div", { class: "ticks" }, h("span", {}, "0"), h("span", {}, num(scale.max / 2, 1)), h("span", {}, num(scale.max, 1))),
     h(
       "div",
       { class: "sym" },
-      h("span", {}, h("span", { class: "c", style: `background:${cssVar("--axis")};width:6px;height:6px` }), "kinnitamata jaam (ainult vaatlus)"),
+      h("span", {}, h("span", { class: "c big" }), "kliimajaam"),
+      h("span", {}, h("span", { class: "c small" }), "muu vaatlusjaam (XML)"),
+      h("span", {}, h("span", { class: "c hollow" }), "andmed puuduvad"),
+    ),
+  );
+  const nWith = finite.length;
+  $("map-lead").textContent =
+    `${BUCKET_LABEL[s.bucket]} · ${data.meta.variables[stationVar(s.variable, "kliima")]?.label ?? s.variable} · tõde ${s.truth}. ` +
+    `Andmed ${nWith} jaamas ${data.stations.features.length}-st. ` +
+    (s.truth === "T2" ? "Muud vaatlusjaamad (XML) on hallid: neil on ainult T1-mõõtmised – vali üleval „T1“." : "");
+  renderList(s, vals);
+}
+
+function renderList(s: State, vals: { f: StationFeature; v: number | null; n: number }[]): void {
+  const q = $<HTMLInputElement>("station-search").value.trim().toLowerCase();
+  const unit = unitOf(s.variable);
+  const rows = vals
+    .filter(({ f }) => !q || f.properties.name.toLowerCase().includes(q))
+    .sort((a, b) => {
+      if (a.v === null && b.v !== null) return 1;
+      if (b.v === null && a.v !== null) return -1;
+      if (a.v !== null && b.v !== null) return a.v - b.v;
+      return a.f.properties.name.localeCompare(b.f.properties.name, "et");
+    });
+  $("list-hint").textContent =
+    s.mapMode === "better"
+      ? `IFS − AIFS MAE (${unit}): negatiivne = IFS täpsem. Klõpsa jaamal analüüsi nägemiseks.`
+      : `${SHORT[s.mapMode]} MAE (${unit}), väiksem on parem. Klõpsa jaamal analüüsi nägemiseks.`;
+  const body = rows.map(({ f, v, n }) => {
+    const p = f.properties;
+    const winner = s.mapMode === "better" && v !== null ? (v < 0 ? "ifs" : v > 0 ? "aifs-single" : null) : null;
+    const tr = h(
+      "tr",
+      { class: `clickable${p.id === s.station ? " sel" : ""}`, tabindex: 0 },
+      h("td", {}, p.name, h("span", { class: `tag ${p.class}` }, p.class === "kliima" ? "kliima" : "XML")),
+      h("td", {}, v === null ? h("span", { class: "muted" }, "–") : s.mapMode === "better" ? signed(v, 2) : fmt(v, s.variable)),
+      h("td", {}, winner ? h("span", { class: "lb-win" }, keyLine(winner), SHORT[winner] ?? "") : ""),
+      h("td", { class: "muted" }, n ? String(n) : ""),
+    );
+    const pick = () => {
+      store.set({ station: p.id });
+      $("station").scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    tr.addEventListener("click", pick);
+    tr.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        pick();
+      }
+    });
+    return tr;
+  });
+  $("station-list").replaceChildren(
+    h(
+      "table",
+      {},
+      h("thead", {}, h("tr", {}, h("th", {}, "Jaam"), h("th", {}, s.mapMode === "better" ? "Vahe" : "MAE"), h("th", {}, "Parem"), h("th", {}, "n"))),
+      h("tbody", {}, ...body),
     ),
   );
 }
 
-function renderMapTable(s: State, scores: Map<string, StationScore[]>): void {
-  const el = $("map-table");
-  if (el.hidden) return;
-  const unit = unitOf(s.variable);
-  const head = h(
-    "tr",
-    {},
-    h("th", {}, "Jaam"),
-    ...MODELS.flatMap((m) => [h("th", {}, `${SHORT[m]} ${METRICS[s.metric]}, ${unit}`), h("th", {}, `${SHORT[m]} n`)]),
-  );
-  const body = data.stations.features
-    .filter((f) => f.properties.verified)
-    .map((f) => {
-      const list = scores.get(f.properties.id) ?? [];
-      const tr = h(
-        "tr",
-        { class: "clickable", tabindex: 0 },
-        h("td", {}, f.properties.name),
-        ...MODELS.flatMap((m) => {
-          const r = list.find((x) => x.model_id === m);
-          const v = r ? metricValue(r, s.metric) : null;
-          return [h("td", {}, s.metric === "me" ? signed(v, 2) : num(v, 2)), h("td", { class: "muted" }, r ? String(r.n) : "–")];
-        }),
-      );
-      const pick = () => store.set({ station: f.properties.id });
-      tr.addEventListener("click", pick);
-      tr.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          pick();
-        }
-      });
-      return tr;
-    });
-  el.replaceChildren(h("table", {}, h("thead", {}, head), h("tbody", {}, ...body)));
-}
-
-// Map tooltip
 function showStationTooltip(id: string | null, x: number, y: number): void {
   const tip = $("tooltip");
   if (!id) {
@@ -293,37 +554,23 @@ function showStationTooltip(id: string | null, x: number, y: number): void {
   if (!f) return;
   const s = store.get();
   const p = f.properties;
-  const parts: (HTMLElement | string)[] = [h("strong", {}, p.name)];
-  if (p.verified) {
-    const list = stationScores(s).get(id);
-    const unit = unitOf(s.variable);
-    for (const m of MODELS) {
-      const r = list?.find((x) => x.model_id === m);
-      const v = r ? metricValue(r, s.metric) : null;
-      parts.push(
-        h(
-          "div",
-          { class: "row" },
-          h("span", {}, h("span", { class: "key-line", style: `border-color:${seriesColor(m)};margin-right:6px` }), `${SHORT[m]} ${METRICS[s.metric]}`),
-          h("strong", {}, `${s.metric === "me" ? signed(v, 2) : num(v, 2)} ${unit}`),
-        ),
-      );
-    }
-    const n = list?.[0]?.n;
-    parts.push(h("div", { class: "muted" }, n ? `n = ${n} · ${BUCKET_LABEL[s.bucket]}` : "selles valikus paare pole"));
-  } else {
-    parts.push(h("div", { class: "muted" }, "Kinnitamata asukoht – skoore ei arvutata"));
+  const parts: (HTMLElement | string)[] = [h("strong", {}, p.name), h("div", { class: "muted" }, p.class === "kliima" ? "Kliimajaam (kinnitatud)" : "Vaatlusjaam XML-ist (ainult T1)")];
+  const list = lastMapRows.get(id);
+  const v = stationVar(s.variable, p.class);
+  for (const m of [...COMPETITORS, REF]) {
+    const r = list?.find((x) => x.model_id === m);
+    if (!r) continue;
+    parts.push(h("div", { class: "row" }, h("span", {}, keyLine(m), ` ${SHORT[m]}`), h("strong", {}, `${fmt(r.mae, v)} ${unitOf(v)}`)));
   }
+  if (!list?.length) parts.push(h("div", { class: "muted" }, "Selles valikus paare pole."));
   const o = p.latest_obs;
   if (o) {
-    parts.push(
-      h(
-        "div",
-        { class: "muted", style: "margin-top:4px" },
-        `Viimane vaatlus ${local(o.time_utc)}: ${num(o.t2m_degC, 1)} °C, tuul ${num(o.wind_speed_m_s, 1)} m/s` +
-          (o.phenomenon ? `, ${o.phenomenon}` : ""),
-      ),
-    );
+    const bits = [
+      o.t2m_degC !== null ? `${num(o.t2m_degC, 1)} °C` : "",
+      o.wind_speed_m_s !== null ? `tuul ${num(o.wind_speed_m_s, 1)} m/s` : "",
+      o.phenomenon ?? "",
+    ].filter(Boolean);
+    if (bits.length) parts.push(h("div", { class: "muted", style: "margin-top:4px" }, `${local(o.time_utc)}: ${bits.join(", ")}`));
   }
   tip.replaceChildren(...parts);
   tip.hidden = false;
@@ -332,180 +579,7 @@ function showStationTooltip(id: string | null, x: number, y: number): void {
   tip.style.top = `${y + 14}px`;
 }
 
-// ---------- lead chart ----------
-function renderLead(s: State): void {
-  const unit = unitOf(s.variable);
-  const sel = data.lead.filter(
-    (r) =>
-      r.variable === s.variable && r.truth_level === s.truth && r.interp_method === s.method && r.sample === "common",
-  );
-  const series: SeriesSpec[] = [...MODELS, "persistence"].map((m) => ({
-    key: m,
-    name: data.meta.models[m] ?? m,
-    color: seriesColor(m),
-    dashed: m === "persistence",
-    points: sel
-      .filter((r) => r.model_id === m && r.lead_h > 0)
-      .sort((a, b) => a.lead_h - b.lead_h)
-      .map((r) => [r.lead_h, metricValue(r, s.metric)] as [number, number | null]),
-  }));
-  const el = $("lead-chart");
-  if (!series.some((x) => x.points.length)) {
-    clearChart(el, "Selle valiku jaoks paare veel pole");
-  } else {
-    leadChart(el, series, unit);
-  }
-  $("lead-hint").textContent =
-    `${METRICS[s.metric]}, ${unit} · ${data.meta.variables[s.variable]?.label ?? s.variable} · ${data.meta.truth_levels[s.truth] ?? s.truth} · ühine valim (samad jooksud, etteanded, jaamad, tunnid). ` +
-    `${data.meta.variables[s.variable]?.note ?? ""}`;
-  const tbl = $("lead-table");
-  if (!tbl.hidden) {
-    const leads = [...new Set(sel.map((r) => r.lead_h))].sort((a, b) => a - b);
-    tbl.replaceChildren(
-      h(
-        "table",
-        {},
-        h("thead", {}, h("tr", {}, h("th", {}, "Etteanne, h"), ...series.map((x) => h("th", {}, `${SHORT[x.key]}, ${unit}`)), h("th", {}, "n"))),
-        h(
-          "tbody",
-          {},
-          ...leads.map((L) => {
-            const rs = sel.filter((r) => r.lead_h === L);
-            return h(
-              "tr",
-              {},
-              h("td", {}, String(L)),
-              ...series.map((x) => {
-                const r = rs.find((q) => q.model_id === x.key);
-                return h("td", {}, r ? (s.metric === "me" ? signed(metricValue(r, s.metric), 2) : num(metricValue(r, s.metric), 2)) : "–");
-              }),
-              h("td", { class: "muted" }, String(rs[0]?.n ?? "")),
-            );
-          }),
-        ),
-      ),
-    );
-  }
-}
-
-// ---------- scorecard ----------
-function renderScorecard(s: State): void {
-  const el = $("scorecard");
-  const buckets = data.meta.lead_buckets;
-  const vars = VAR_TABS.map(([k]) => k);
-  const sel = data.diff.filter((r) => r.truth_level === s.truth && r.interp_method === s.method);
-  if (!sel.length) {
-    el.replaceChildren(h("p", { class: "empty" }, "Ühisel valimil pole veel võrdlusandmeid."));
-    return;
-  }
-  const scale = diverging(0.3);
-  const body = vars.map((v) =>
-    h(
-      "tr",
-      {},
-      h("td", {}, data.meta.variables[v]?.label ?? v),
-      ...buckets.map((b) => {
-        const r = sel.find((x) => x.variable === v && x.lead_bucket === b);
-        if (!r || r.rel_diff === null) return h("td", { class: "muted", style: "text-align:center" }, "·");
-        const bg = scale.color(Math.max(-0.3, Math.min(0.3, r.rel_diff)));
-        const strong = Math.abs(r.rel_diff) > 0.15;
-        const td = h(
-          "td",
-          {
-            class: "cell",
-            style: `background:${bg};color:${strong ? "#fff" : "var(--ink)"}`,
-            title: `IFS ${num(r.mae_ifs, 2)} vs AIFS ${num(r.mae_aifs, 2)}; n = ${r.n}, ${r.n_days} päeva` +
-              (r.diff_ci_low !== null ? `; 95 % CI vahe ${num(r.diff_ci_low, 2)}…${num(r.diff_ci_high, 2)}` : "; CI pole (alla 10 päeva)"),
-          },
-          signed(r.rel_diff * 100, 0) + " %",
-        );
-        if (r.significant) td.append(h("span", { class: "sig", "aria-label": "statistiliselt oluline" }, " ●"));
-        return td;
-      }),
-    ),
-  );
-  el.replaceChildren(
-    h(
-      "div",
-      { class: "table-view", style: "max-height:none" },
-      h(
-        "table",
-        {},
-        h("thead", {}, h("tr", {}, h("th", {}, "Muutuja"), ...buckets.map((b) => h("th", { style: "text-align:center" }, BUCKET_LABEL[b] ?? b)))),
-        h("tbody", {}, ...body),
-      ),
-    ),
-    h(
-      "p",
-      { class: "hint" },
-      "(MAE_IFS − MAE_AIFS) / MAE_AIFS. Negatiivne = IFS-i viga väiksem. ● = 95 % plokk-bootstrapi vahemik ei sisalda nulli (alates 10 päevast). Hõljuta lahtril detailide nägemiseks.",
-    ),
-  );
-}
-
-// ---------- precipitation ----------
-function renderPrecip(s: State): void {
-  const el = $("precip");
-  const sel = data.precip.filter((r) => r.interp_method === s.method && r.window === s.window && r.lead_bucket === s.bucket);
-  $("precip-hint").textContent =
-    `Ööpäev ${s.window} UTC · ${BUCKET_LABEL[s.bucket]} · tõde T2 (PR1H summa). ` +
-    "Prognoosi pakkimistäpsuse tõttu on osa juhtumeid „ebamäärased“ (ADR-005) – skoorid arvutatakse kindlatel juhtudel.";
-  if (!sel.length) {
-    el.replaceChildren(h("p", { class: "empty" }, "Selle valiku jaoks 24 h paare veel pole."));
-    return;
-  }
-  const thr = data.meta.precip_thresholds_mm;
-  const first = (m: string) => sel.find((r) => r.model_id === m);
-  const summary = h(
-    "div",
-    { class: "kpis", style: "margin:0" },
-    ...MODELS.map((m) => {
-      const r = first(m);
-      return h(
-        "div",
-        { class: "kpi" },
-        h("div", { class: "k-label" }, h("span", { class: "key-line", style: `border-color:${seriesColor(m)}` }), `${SHORT[m]} · MAE`),
-        h("div", { class: "k-value" }, num(r?.mae, 2), h("span", { class: "k-unit" }, "mm")),
-        h("div", { class: "k-foot" }, r ? `ME ${signed(r.me, 2)} mm · n = ${r.n}` : "–"),
-      );
-    }),
-  );
-  const table = h(
-    "table",
-    {},
-    h(
-      "thead",
-      {},
-      h(
-        "tr",
-        {},
-        h("th", {}, "Lävi"),
-        ...MODELS.flatMap((m) => [h("th", {}, `${SHORT[m]} POD`), h("th", {}, "FAR"), h("th", {}, "CSI"), h("th", { title: "ebamäärased juhtumid (ADR-005)" }, "ebam.")]),
-        h("th", { title: "vaadeldud sündmuste arv" }, "sünd."),
-      ),
-    ),
-    h(
-      "tbody",
-      {},
-      ...thr.map((t) => {
-        const cells = MODELS.flatMap((m) => {
-          const r = sel.find((x) => x.model_id === m && x.threshold_mm === t);
-          return [
-            h("td", {}, num(r?.pod, 2)),
-            h("td", {}, num(r?.far, 2)),
-            h("td", {}, num(r?.csi, 2)),
-            h("td", { class: "muted" }, r ? String(r.n_uncertain) : "–"),
-          ];
-        });
-        const ev = sel.find((x) => x.threshold_mm === t)?.n_obs_events;
-        return h("tr", {}, h("td", {}, `≥ ${num(t, 1)} mm`), ...cells, h("td", { class: "muted" }, ev === undefined ? "–" : String(ev)));
-      }),
-    ),
-  );
-  el.replaceChildren(summary, h("div", { class: "table-view", style: "margin-top:10px" }, table));
-}
-
-// ---------- station panel ----------
+// ---------------------------------------------------------------- 3. station
 const STATION_VARS: [StationVar, string][] = [
   ["t2m", "Temp."],
   ["wind", "Tuul"],
@@ -523,7 +597,6 @@ function zip(c: Columnar | undefined, field: string): [string, number | null][] 
   return t.map((x, i) => [x, v[i] ?? null]);
 }
 
-/** Forecast accumulation -> amount per step interval, plotted at the interval end. */
 function stepPrecip(c: Columnar | undefined): [string, number | null][] {
   const pts = zip(c, "precip_acc_mm");
   const out: [string, number | null][] = [];
@@ -535,73 +608,132 @@ function stepPrecip(c: Columnar | undefined): [string, number | null][] {
   return out;
 }
 
+function lest97(lon: number, lat: number): [number, number] {
+  const [x, y] = proj4("EPSG:4326", "EPSG:3301", [lon, lat]);
+  return [x ?? NaN, y ?? NaN];
+}
+
 let stationToken = 0;
 
 async function renderStation(s: State): Promise<void> {
-  const el = $("station-chart");
-  syncSegmented($("f-stationvar"), s.stationVar);
-  if (!s.station) {
-    $("station-title").textContent = "Vali jaam";
-    $("station-meta").textContent = "Klõpsa kaardil jaamale või vali see kaardi tabelist.";
-    clearChart(el, "Jaam valimata");
+  const f = s.station ? stationsById.get(s.station) : undefined;
+  const notice = $("station-notice");
+  notice.replaceChildren();
+  if (!f) {
+    $("station-title").replaceChildren(h("span", { class: "num" }, "3"), " Jaama analüüs");
+    $("station-meta").textContent = "Vali jaam kaardilt või loendist.";
+    $("station-kpis").replaceChildren();
+    clearChart($("st-err-chart"), "Jaam valimata");
+    clearChart($("st-ts-chart"), "Jaam valimata");
     return;
   }
-  const f = stationsById.get(s.station);
-  $("station-title").textContent = f?.properties.name ?? s.station;
-  const p = f?.properties;
-  $("station-meta").textContent = p
-    ? `${p.id}${p.wmo_code ? ` · WMO ${p.wmo_code}` : ""} · ${num(f.geometry.coordinates[1], 4)} N, ${num(f.geometry.coordinates[0], 4)} E` +
-      (p.height_m_EH2000 !== null ? ` · ${num(p.height_m_EH2000, 1)} m (EH2000)` : "") +
-      (p.verified ? "" : " · kinnitamata asukoht")
-    : "";
+  const p = f.properties;
+  const [lon, lat] = f.geometry.coordinates;
+  const [east, north] = lest97(lon, lat);
+  $("station-title").replaceChildren(h("span", { class: "num" }, "3"), ` Jaama analüüs: ${p.name}`);
+  const measures = p.latest_obs?.measures ?? [];
+  const mLabel: Record<string, string> = { t2m: "temperatuur", wind: "tuul", precip: "sademed", pressure: "õhurõhk" };
+  $("station-meta").textContent =
+    `${p.class === "kliima" ? "Kliimajaam" : "Vaatlusjaam (XML)"} · ${p.id}${p.wmo_code ? ` · WMO ${p.wmo_code}` : ""} · ` +
+    `${num(lat, 4)} N, ${num(lon, 4)} E (L-EST97 x ${num(north, 0)}, y ${num(east, 0)})` +
+    (p.height_m_EH2000 !== null ? ` · ${num(p.height_m_EH2000, 1)} m (EH2000)` : " · kõrgus teadmata") +
+    (measures.length ? ` · mõõdab: ${measures.map((m) => mLabel[m] ?? m).join(", ")}` : "");
+  if (p.class === "xml" && s.truth === "T2") {
+    const btn = h("button", { type: "button", class: "ghost" }, "Vaheta tõeks T1");
+    btn.addEventListener("click", () => store.set({ truth: "T1", network: "koik" }));
+    notice.append(h("div", { class: "notice" }, "See jaam on ainult vaatluste XML-is: kvaliteedikontrollitud (T2) andmeid pole. Skoorid on T1 (toormõõtmine) korral. ", btn));
+  }
+  // KPIs + error by bucket from station scores
+  const v = stationVar(s.variable, p.class);
+  const unit = unitOf(v);
+  const rowsAll = data.station.filter((r) => r.station_id === p.id && r.truth_level === s.truth && r.interp_method === s.method && r.variable === v);
+  const kpis = [...COMPETITORS, REF]
+    .map((m) => ({ m, r: rowsAll.find((r) => r.model_id === m && r.lead_bucket === s.bucket) }))
+    .filter((x) => x.r);
+  $("station-kpis").replaceChildren(
+    ...(kpis.length
+      ? kpis.map(({ m, r }) =>
+          h(
+            "div",
+            { class: "kpi" },
+            h("div", { class: "k-label" }, keyLine(m), `${SHORT[m]} · MAE · ${BUCKET_LABEL[s.bucket]}`),
+            h("div", { class: "k-value" }, fmt(r?.mae, v), h("span", { class: "k-unit" }, unit)),
+            h("div", { class: "k-foot" }, `nihe ${signed(r?.me ?? null, 2)} ${unit} · n = ${r?.n}`),
+          ),
+        )
+      : [emptyBox(`${data.meta.variables[v]?.label ?? v}: selles jaamas pole valitud tõe (${s.truth}) ja etteande jaoks paare.`)]),
+  );
+  const buckets = data.meta.lead_buckets.filter((b) => rowsAll.some((r) => r.lead_bucket === b));
+  const bars: BarSeries[] = [...COMPETITORS, REF]
+    .filter((m) => rowsAll.some((r) => r.model_id === m))
+    .map((m) => ({
+      name: SHORT[m] ?? m,
+      color: colorOf(m),
+      dashed: m === REF,
+      values: buckets.map((b) => rowsAll.find((r) => r.model_id === m && r.lead_bucket === b)?.mae ?? null),
+    }));
+  const errEl = $("st-err-chart");
+  if (!buckets.length) clearChart(errEl, "Selles jaamas pole valitud tõe ja muutuja jaoks paare");
+  else barChart(errEl, buckets.map((b) => BUCKET_LABEL[b] ?? b), bars, unit);
+  $("st-err-hint").textContent = `${data.meta.variables[v]?.label ?? v} (MAE, ${unit}), tõde ${s.truth}. Madalam tulp = täpsem. Muutujat vaheta jaotise 1 vahelehtedelt.`;
+
+  // Time series
+  const el = $("st-ts-chart");
   const token = ++stationToken;
-  const series = await loadStationSeries(s.station);
+  const series = await loadStationSeries(p.id);
   if (token !== stationToken) return;
   if (!series) {
-    clearChart(el, p?.verified ? "Aegrida puudub" : "Kinnitamata jaam: aegrida ei koostata");
-    $("station-foot").textContent = "";
+    clearChart(el, "Aegrida puudub (selles jaamas pole veel prognoose ega vaatlusi)");
+    $("st-ts-hint").textContent = "";
     return;
   }
   const obsColor = cssVar("--series-obs");
   const specs: SeriesSpec[] = [];
-  let unit = "°C";
-  const fcField = s.stationVar === "t2m" ? "t2m_degC" : s.stationVar === "wind" ? "wind_speed_m_s" : "mslp_hPa";
-  const obsField = s.stationVar === "precip" ? "precip_1h_mm" : fcField;
-  unit = s.stationVar === "t2m" ? "°C" : s.stationVar === "wind" ? "m/s" : s.stationVar === "mslp" ? "hPa" : "mm";
-  if (s.stationVar === "precip") {
-    specs.push({ key: "obs", name: "Vaatlus T2, mm/h", color: obsColor, kind: "bar", points: zip(series.obs.T2, obsField) });
-    for (const m of MODELS) {
+  const sv = s.stationVar;
+  const fcField = sv === "t2m" ? "t2m_degC" : sv === "wind" ? "wind_speed_m_s" : "mslp_hPa";
+  const tsUnit = sv === "t2m" ? "°C" : sv === "wind" ? "m/s" : sv === "mslp" ? "hPa" : "mm";
+  if (sv === "precip") {
+    const obs = series.obs.T2 ?? series.obs.T1;
+    if (obs) specs.push({ key: "obs", name: `Vaatlus ${series.obs.T2 ? "T2" : "T1"}, mm/h`, color: obsColor, kind: "bar", points: zip(obs, "precip_1h_mm") });
+    for (const m of COMPETITORS) {
       const r = series.latest_run[m];
-      if (r) specs.push({ key: m, name: `${SHORT[m]} viimane jooks, mm/samm`, color: seriesColor(m), kind: "bar", points: stepPrecip(r) });
+      if (r) specs.push({ key: m, name: `${SHORT[m]} viimane jooks, mm/samm`, color: colorOf(m), kind: "bar", points: stepPrecip(r) });
     }
   } else {
-    if (series.obs.T2) specs.push({ key: "T2", name: "Vaatlus T2 (kvaliteedikontrollitud)", color: obsColor, points: zip(series.obs.T2, obsField), width: 2.5 });
-    if (series.obs.T1 && s.stationVar !== "mslp")
-      specs.push({ key: "T1", name: "Vaatlus T1 (XML, toores)", color: obsColor, kind: "dots", points: zip(series.obs.T1, obsField) });
-    for (const m of MODELS) {
+    if (series.obs.T2) specs.push({ key: "T2", name: "Vaatlus T2", color: obsColor, points: zip(series.obs.T2, fcField), width: 2.5 });
+    if (series.obs.T1 && sv !== "mslp") specs.push({ key: "T1", name: "Vaatlus T1 (XML)", color: obsColor, kind: "dots", points: zip(series.obs.T1, fcField) });
+    for (const m of COMPETITORS) {
       const tr = series.trace_24h[m];
-      if (tr) specs.push({ key: `${m}-24`, name: `${SHORT[m]} 24–30 h ette`, color: seriesColor(m), dashed: true, width: 1.5, points: zip(tr, fcField) });
+      if (tr) specs.push({ key: `${m}-24`, name: `${SHORT[m]} 1 päev ette`, color: colorOf(m), dashed: true, width: 1.5, points: zip(tr, fcField) });
       const r = series.latest_run[m];
-      if (r) specs.push({ key: m, name: `${SHORT[m]} viimane jooks`, color: seriesColor(m), points: zip(r, fcField) });
+      if (r) specs.push({ key: m, name: `${SHORT[m]} viimane jooks`, color: colorOf(m), points: zip(r, fcField) });
     }
   }
   const now = Date.now();
-  const nowIso = new Date(now).toISOString();
-  // Initial window: last 4 days of observations and the next 5 days of forecasts.
-  const startIso = new Date(now - 4 * 86_400_000).toISOString();
-  const endIso = new Date(now + 5 * 86_400_000).toISOString();
-  if (!specs.some((x) => x.points.length)) clearChart(el, "Selle muutuja andmed puuduvad");
-  else stationChart(el, { title: "", unit, series: specs, nowIso, startIso, endIso, bars: s.stationVar === "precip" });
-  const runs = MODELS.map((m) => {
+  if (!specs.some((q) => q.points.some((pt) => pt[1] !== null))) {
+    clearChart(el, p.class === "xml" && sv === "mslp" ? "XML-jaamade rõhku ei võrrelda" : "Selle muutuja andmed puuduvad");
+  } else {
+    stationChart(el, {
+      title: "",
+      unit: tsUnit,
+      series: specs,
+      nowIso: new Date(now).toISOString(),
+      startIso: new Date(now - 4 * 86_400_000).toISOString(),
+      endIso: new Date(now + 5 * 86_400_000).toISOString(),
+      bars: sv === "precip",
+    });
+  }
+  const runs = COMPETITORS.map((m) => {
     const r = series.latest_run[m];
-    return r?.issue_time_utc ? `${SHORT[m]} ${local(r.issue_time_utc as string)} (${r.model_cycle ?? ""})` : null;
+    return r?.issue_time_utc ? `${SHORT[m]} ${local(r.issue_time_utc as string)}` : null;
   }).filter(Boolean);
-  $("station-foot").textContent =
-    `Viimased jooksud: ${runs.join(" · ") || "–"}. Prognoos: lähim maapunkt, temperatuur kõrguskorrektsiooniga. ` +
-    "Katkendjoon: prognoos, mis tehti 24–30 h enne vaatlust. Kerimine/suum hiire või puutega.";
+  $("st-ts-hint").textContent =
+    `Viimased jooksud: ${runs.join(" · ") || "–"}. Katkendjoon = prognoos, mis tehti ~1 päev enne. ` +
+    (p.class === "xml" && sv === "t2m" ? "Temperatuur ilma kõrguskorrektsioonita. " : "") +
+    "Suumi hiire/puutega.";
 }
 
-// ---------- status ----------
+// ---------------------------------------------------------------- 4. status + precip
 function renderStatus(): void {
   const m = data.meta;
   const fr = m.freshness;
@@ -621,7 +753,7 @@ function renderStatus(): void {
           h("span", {}, srcNames[k] ?? k),
           h(
             "span",
-            { class: "state", title: `lävi ${v.threshold_hours} h` },
+            { class: "state" },
             h("span", { class: "dot", style: `background:${ok ? cssVar("--good") : cssVar("--critical")}` }),
             ok ? "värske" : "vananenud",
             h("span", { class: "muted", style: "font-weight:400" }, ` · ${v.age_hours === null ? "–" : `${num(v.age_hours, 1)} h`}`),
@@ -629,32 +761,21 @@ function renderStatus(): void {
         );
       })
     : [h("p", { class: "muted" }, "Monitori olekut pole.")];
-  const inv = m.inventory?.models ?? {};
+  const pendingRows = Object.keys(m.pending_models).map((k) =>
+    h("div", { class: "src-row" }, h("span", {}, m.models[k] ?? k), h("span", { class: "state" }, h("span", { class: "dot", style: `background:${cssVar("--warning")}` }), "ootel")),
+  ).concat(Object.entries(m.pending_models).map(([, why]) => h("p", { class: "hint" }, why)));
   const runRows = Object.entries(m.runs).map(([k, v]) =>
-    h(
-      "div",
-      { class: "src-row" },
-      h("span", {}, m.models[k] ?? k),
-      h("span", {}, `${v.n} jooksu · ${local(v.first_utc)} … ${local(v.last_utc)} · tsükkel ${v.cycles.join(", ")}`),
-    ),
-  );
-  const invRows = Object.entries(inv).map(([k, v]) =>
-    h("div", { class: "src-row" }, h("span", {}, `${SHORT[k] ?? k}: viimased 14 päeva`), h("span", {}, `${v.runs_complete}/${v.runs_expected} jooksu (${pct(v.completeness_fraction)}; arhiiv algas ${local(m.runs[k]?.first_utc)})`)),
+    h("div", { class: "src-row" }, h("span", {}, m.models[k] ?? k), h("span", {}, `${v.n} jooksu · ${local(v.first_utc)} … ${local(v.last_utc)} · ${v.cycles.join(", ")}`)),
   );
   $("status").replaceChildren(
-    h("div", {}, h("h3", {}, "Allikate värskus"), ...srcRows),
+    h("div", {}, h("h3", {}, "Allikad"), ...srcRows, ...pendingRows),
     h(
       "div",
       {},
       h("h3", {}, "Arhiiv"),
       ...runRows,
-      ...invRows,
-      h(
-        "div",
-        { class: "src-row" },
-        h("span", {}, "Paare"),
-        h("span", {}, `${m.period.n_pairs.toLocaleString("et-EE")} · ${m.period.n_days} päeva (${local(m.period.first_valid_utc)} … ${local(m.period.last_valid_utc)})`),
-      ),
+      h("div", { class: "src-row" }, h("span", {}, "Paare"), h("span", {}, `${m.period.n_pairs.toLocaleString("et-EE")} · ${m.period.n_days} päeva`)),
+      h("div", { class: "src-row" }, h("span", {}, "Periood"), h("span", {}, `${local(m.period.first_valid_utc)} … ${local(m.period.last_valid_utc)}`)),
     ),
     h(
       "div",
@@ -663,15 +784,17 @@ function renderStatus(): void {
       h(
         "ul",
         {},
+        h("li", {}, "MAE = keskmine absoluutne viga; ME (nihe) = keskmine viga märgiga. Persistents = vaatlus 24 h (või k·24 h) enne – lihtsaim võrdlusprognoos."),
+        h("li", {}, "T2 = KAURi kliimaandmestik (kvaliteedikontrollitud, ~1 päev viitega). T1 = vaatluste XML (toormõõtmine, hetktõmmis 10–30 min pärast täistundi)."),
+        h("li", {}, "Mudelid võrreldakse ühisel valimil: samad jooksud, etteanded, jaamad ja tunnid."),
+        h("li", {}, "Prognoosi väärtus jaamas: lähim maapunkt + temperatuuri kõrguskorrektsioon 0,0065 K/m (kliimajaamad); bilineaarne ja lähim ruudupunkt valitavad."),
         ...m.notes.map((n) => h("li", {}, n)),
-        h("li", {}, "Punktverifitseerimine jaamas (ADR-001); 25 kinnitatud kliimajaama. Lähim maapunkt + 0,0065 K/m (ADR-006), bilineaarne ja lähim ruudupunkt diagnostikana."),
-        h("li", {}, "T2 = KAURi kliimaandmestik (kvaliteedikontrollitud, ~1 päev viitega); T1 = vaatluste XML (toormõõtmine, hetktõmmis 10–30 min pärast täistundi)."),
-        h("li", {}, "Persistents: vaatlus väljastusajal teadaolevast ööpäevast (valiidsusaeg − k·24 h)."),
       ),
     ),
   );
   $("attribution").replaceChildren(
     ...m.attribution.flatMap((a, i) => [i ? " · " : "", h("a", { href: a.url, rel: "noopener" }, a.text)]),
+    " · Aluskaart: © Maa- ja Ruumiamet",
     ` · Andmed koostatud ${local(m.generated_utc, true)}.`,
   );
   const problems = fr?.problems.length ?? 0;
@@ -684,31 +807,53 @@ function renderStatus(): void {
   pill.title = fr?.problems.join("\n") || "Kõik allikad värsked";
 }
 
-// ---------- wiring ----------
-function syncControls(s: State): void {
-  syncSegmented($("f-variable"), s.variable);
-  syncSegmented($("f-metric"), s.metric);
-  syncSegmented($("f-bucket"), s.bucket);
-  syncSegmented($("f-mapmodel"), s.mapModel);
-  syncSegmented($("f-window"), s.window);
-  $<HTMLSelectElement>("f-truth").value = s.truth;
-  $<HTMLSelectElement>("f-method").value = s.method;
+function renderPrecip(s: State): void {
+  const el = $("precip");
+  const sel = data.precip.filter((r) => r.interp_method === s.method && r.window === "06-06" && r.lead_bucket === s.bucket);
+  if (!sel.length) {
+    el.replaceChildren(emptyBox(`${BUCKET_LABEL[s.bucket]}: 24 h sademete paare veel pole.`));
+    return;
+  }
+  const models = COMPETITORS.filter((m) => sel.some((r) => r.model_id === m));
+  el.replaceChildren(
+    h("p", { class: "hint" }, `${BUCKET_LABEL[s.bucket]} (etteande valik jaotises 2). POD = tabamuste osa, FAR = valehäirete osa, CSI = ühine täpsus. „ebam.“ = juhtumid, mida prognoosi pakkimistäpsuse tõttu ei saa kindlalt liigitada (ADR-005).`),
+    h(
+      "div",
+      { class: "table-view" },
+      h(
+        "table",
+        {},
+        h("thead", {}, h("tr", {}, h("th", {}, "Lävi"), ...models.flatMap((m) => [h("th", {}, `${SHORT[m]} POD`), h("th", {}, "FAR"), h("th", {}, "CSI"), h("th", {}, "ebam.")]), h("th", {}, "sündmusi"))),
+        h(
+          "tbody",
+          {},
+          ...data.meta.precip_thresholds_mm.map((t) => {
+            const cells = models.flatMap((m) => {
+              const r = sel.find((x) => x.model_id === m && x.threshold_mm === t);
+              return [h("td", {}, num(r?.pod, 2)), h("td", {}, num(r?.far, 2)), h("td", {}, num(r?.csi, 2)), h("td", { class: "muted" }, r ? String(r.n_uncertain) : "–")];
+            });
+            const ev = sel.find((x) => x.threshold_mm === t)?.n_obs_events;
+            return h("tr", {}, h("td", {}, `≥ ${num(t, 1)} mm`), ...cells, h("td", { class: "muted" }, ev === undefined ? "–" : String(ev)));
+          }),
+        ),
+      ),
+    ),
+  );
 }
 
+// ---------------------------------------------------------------- wiring
 function renderAll(s: State, changed?: Set<keyof State>): void {
   syncControls(s);
-  const only = (...k: (keyof State)[]) => !changed || k.some((x) => changed.has(x));
-  if (only("variable", "metric", "bucket", "truth", "method")) renderKpis(s);
-  if (only("variable", "metric", "bucket", "truth", "method", "mapModel", "station")) renderMap(s);
-  if (only("variable", "metric", "truth", "method")) renderLead(s);
-  if (only("truth", "method")) renderScorecard(s);
-  if (only("method", "window", "bucket")) renderPrecip(s);
-  if (only("station", "stationVar")) void renderStation(s);
+  const any = (...k: (keyof State)[]) => !changed || k.some((x) => changed.has(x));
+  if (any("truth", "network", "method", "variable")) renderLeaderboard(s);
+  if (any("truth", "network", "method", "variable")) renderLeadCharts(s);
+  if (any("truth", "method", "variable", "bucket", "mapMode", "station")) renderMapAndList(s);
+  if (any("truth", "method", "variable", "bucket", "station", "stationVar")) void renderStation(s);
+  if (any("method", "bucket")) renderPrecip(s);
 }
 
 function setupTheme(): void {
-  const btn = $("theme-toggle");
-  btn.addEventListener("click", () => {
+  $("theme-toggle").addEventListener("click", () => {
     const next = isDark() ? "light" : "dark";
     document.documentElement.dataset.theme = next;
     try {
@@ -731,11 +876,10 @@ function setupTableToggles(): void {
   for (const b of document.querySelectorAll<HTMLButtonElement>("[data-table-toggle]")) {
     b.setAttribute("aria-pressed", "false");
     b.addEventListener("click", () => {
-      const id = `${b.dataset.tableToggle}-table`;
-      const t = $(id);
+      const t = $(`${b.dataset.tableToggle}-table`);
       t.hidden = !t.hidden;
       b.setAttribute("aria-pressed", String(!t.hidden));
-      renderAll(store.get());
+      renderLeadCharts(store.get());
     });
   }
 }
@@ -745,43 +889,59 @@ async function init(): Promise<void> {
     data = await loadSite();
   } catch (e) {
     $("freshness").textContent = "Andmete laadimine ebaõnnestus";
-    $("main").prepend(h("p", { class: "empty" }, `Andmeid ei õnnestunud laadida: ${String(e)}`));
+    $("main").prepend(emptyBox(`Andmeid ei õnnestunud laadida: ${String(e)}`));
     return;
   }
   for (const f of data.stations.features) stationsById.set(f.properties.id, f);
-  segmented($("f-variable"), VAR_TABS, "variable");
-  segmented($("f-metric"), Object.entries(METRICS) as [string, string][], "metric");
-  segmented($("f-bucket"), data.meta.lead_buckets.map((b) => [b, BUCKET_LABEL[b] ?? b]), "bucket");
   segmented(
-    $("f-mapmodel"),
+    $("f-truth"),
     [
-      ["ifs", "IFS"],
-      ["aifs-single", "AIFS"],
-      ["diff", "IFS − AIFS"],
-    ] as [MapModel, string][],
-    "mapModel",
-  );
-  segmented($("f-stationvar"), STATION_VARS, "stationVar");
-  segmented(
-    $("f-window"),
-    [
-      ["06-06", "06–06 UTC"],
-      ["00-00", "00–00 UTC"],
+      ["T2", "T2 · kvaliteedikontrollitud"],
+      ["T1", "T1 · toormõõtmine"],
     ],
-    "window",
+    "truth",
   );
-  fillSelect($("f-truth"), Object.entries(data.meta.truth_levels).map(([k, v]) => [k, v.split(" - ")[0] + " · " + (k === "T2" ? "kvaliteedikontrollitud" : "toores")]), "truth");
-  fillSelect($("f-method"), Object.entries(data.meta.methods), "method");
+  segmented(
+    $("f-network"),
+    [
+      ["kliima", "Kliimajaamad"],
+      ["koik", "Kõik vaatlusjaamad"],
+    ],
+    "network",
+  );
+  const method = $<HTMLSelectElement>("f-method");
+  method.replaceChildren(...Object.entries(data.meta.methods).map(([v, l]) => h("option", { value: v }, l)));
+  method.addEventListener("change", () => store.set({ method: method.value }));
+  tabs($("f-variable"), VARS, "variable");
+  segmented(
+    $("f-mapmode"),
+    [
+      ["better", "Kumb parem"],
+      ["ifs", "IFS viga"],
+      ["aifs-single", "AIFS viga"],
+    ],
+    "mapMode",
+  );
+  segmented($("f-bucket"), data.meta.lead_buckets.map((b) => [b, BUCKET_LABEL[b] ?? b]), "bucket");
+  segmented($("f-stationvar"), STATION_VARS, "stationVar");
+  $("station-search").addEventListener("input", () => renderMapAndList(store.get()));
 
   map = createMap($("map"), showStationTooltip, (id) => store.set({ station: id }));
   setupTheme();
   setupTableToggles();
   renderStatus();
-  store.subscribe((s, changed) => renderAll(s, changed));
-  // Default station: Tallinn-Harku when nothing chosen (most-used reference station).
-  if (!store.get().station && stationsById.has("AJHARK01")) store.set({ station: "AJHARK01" });
+  // T1 requested via link but T2-only network etc.: normalise once, then render.
+  store.replace(sanitize(store.get()));
+  store.subscribe((s, changed) => {
+    const clean = sanitize(s);
+    if (clean.network !== s.network || clean.station !== s.station) {
+      store.set(clean);
+      return;
+    }
+    renderAll(s, changed);
+  });
+  store.onExternalChange((partial) => store.set(sanitize({ ...store.get(), ...partial })));
   renderAll(store.get());
 }
 
 void init();
-

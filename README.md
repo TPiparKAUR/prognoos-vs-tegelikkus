@@ -113,5 +113,5 @@ cd site && npm ci && npm run dev
 ```
 
 GitHub Pages ehitatakse töövoos `.github/workflows/site.yml` (Settings → Pages → Source: GitHub Actions).
-Aluskaart `site/public/basemap/estonia.geojson` on genereeritud skriptiga `site/scripts/build-basemap.mjs`
-(© OpenStreetMap contributors, ODbL).
+Aluskaart: Maa- ja Ruumiameti hallkaart (WMS, EPSG:3301). Varukontuur `site/public/basemap/estonia.geojson`
+on genereeritud skriptiga `site/scripts/build-basemap.mjs` (© OpenStreetMap contributors, ODbL).

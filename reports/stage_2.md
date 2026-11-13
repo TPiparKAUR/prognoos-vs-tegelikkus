@@ -32,3 +32,13 @@ Ainult 4 valiidsuspäeva → **usaldusvahemikke veel pole; järeldusi teha ei sa
 2. **Asukohaprognoosi näidis** (ADR-017) – faili `tests/fixtures/location_forecast_sample.json` repos ei ole.
 3. Klimatoloogia baseline ja SEEPS vajavad 1991–2020 jaamanorme (kliima-API päevaandmed) – järgmine samm.
 4. DM-HLN test (docs/01 §7) – lisatakse, kui andmeid on ≥ 30 päeva; seni ainult bootstrap.
+
+## Täiendus 2026-11-13 pärastlõuna (tellija tagasiside)
+- **Ajastus:** GitHubi `schedule` ei käivitunud ka pärast `main` vaikeharuks seadmist. Tellija kinnitusel lisati `scheduler.yml` (ADR-020); esimene ring käivitas 14:12 UTC `ingest-kaur`, `ingest-ecmwf`, `monitor` – kõik õnnestusid. XML-i hetktõmmised tulevad nüüd iga 10 min järel → T1-paarid tekivad prognoosisammudel (iga 3 h).
+- **Leht ümber (ADR-018):** üldvõrdlus (võitjatabel, MAE ja nihe etteande järgi), jaamad (kaart + loend „kumb mudel parem"), jaama analüüs, andmed. Kaart L-EST97-s Maa- ja Ruumiameti hallkaardiga (OpenLayers). Kontrollitud: hele/tume, 390 px mobiil, vana link `#variable=wind_vec&truth=T1&station=XML_KUUSIKU_…` → Kuusiku kliimajaam (wind_vec ja andmeteta T1 asendatakse), XML-jaama vaade.
+- **Leitud vead ja parandused:** (1) Kuusiku, Tallinn-Harku ja Tooma olid kaardil kaks korda (XML-duplikaat ilma andmeteta) → kaardil ainult `station_targets` (duplikaadid > 1 km eemaldatud). (2) XML-i ridade seos kliimajaamaga ainult kauguse järgi oleks segamini ajanud nt „Tooma soojaam 1–4" → seos WMO-koodi või nime järgi (test lisatud). (3) Graafikute tühjade olekute tekst ei ilmunud (ECharts TitleComponent).
+- **XML-jaamad analüüsis (ADR-019):** 79 XML-jaama, T1, eraldi võrgustik „Kõik vaatlusjaamad".
+- **Maa-ameti WMS:** kiht `kaart_ht`, ainult EPSG:3301 (GetCapabilities GitHubi runnerilt). Arenduskeskkonnast host on blokeeritud – kaardipilti ei saanud siin näha, kontrolli brauseris.
+- **KAURi asukohaprognoos (ADR-017): blokeeritud.** Server sulgeb ühenduse ka GitHubist; vaja KAURi IT lubatud ligipääsu.
+
+Testid: `pytest` 93 läbitud, `ruff`, `mypy --strict` puhtad, `tsc --strict` + Vite build.

@@ -9,6 +9,7 @@ import {
   MarkAreaComponent,
   DataZoomComponent,
   AriaComponent,
+  TitleComponent,
 } from "echarts/components";
 import { SVGRenderer } from "echarts/renderers";
 import type { EChartsCoreOption } from "echarts/core";
@@ -24,6 +25,7 @@ echarts.use([
   MarkAreaComponent,
   DataZoomComponent,
   AriaComponent,
+  TitleComponent,
   SVGRenderer,
 ]);
 
@@ -83,7 +85,7 @@ function row(color: string, name: string, value: string, dashed = false): string
     } ${esc(color)}"></span><span style="opacity:.8">${esc(name)}</span></span><strong>${esc(value)}</strong></div>`;
 }
 
-export function leadChart(el: HTMLElement, series: SeriesSpec[], unit: string): void {
+export function leadChart(el: HTMLElement, series: SeriesSpec[], unit: string, zeroLine = false): void {
   const c = chrome();
   const chart = chartFor(el);
   const option: EChartsCoreOption = {
@@ -129,7 +131,7 @@ export function leadChart(el: HTMLElement, series: SeriesSpec[], unit: string): 
       splitLine: { lineStyle: { color: c.grid } },
       axisLine: { show: false },
     },
-    series: series.map((s) => ({
+    series: series.map((s, i) => ({
       name: s.name,
       type: "line",
       showSymbol: s.points.length < 30,
@@ -139,6 +141,17 @@ export function leadChart(el: HTMLElement, series: SeriesSpec[], unit: string): 
       lineStyle: { color: s.color, width: 2, type: s.dashed ? "dashed" : "solid" },
       itemStyle: { color: s.color, borderColor: c.surface, borderWidth: 2 },
       emphasis: { focus: "series" },
+      ...(zeroLine && i === 0
+        ? {
+            markLine: {
+              silent: true,
+              symbol: "none",
+              label: { show: false },
+              lineStyle: { color: c.baseline, type: "solid", width: 1.5 },
+              data: [{ yAxis: 0 }],
+            },
+          }
+        : {}),
     })),
   };
   chart.setOption(option, true);
@@ -271,4 +284,66 @@ export function clearChart(el: HTMLElement, message: string): void {
     },
     true,
   );
+}
+
+export interface BarSeries {
+  name: string;
+  color: string;
+  values: (number | null)[];
+  dashed?: boolean;
+}
+
+/** Grouped bars: one group per category (lead bucket), one bar per model. */
+export function barChart(el: HTMLElement, categories: string[], series: BarSeries[], unit: string): void {
+  const c = chrome();
+  const chart = chartFor(el);
+  const option: EChartsCoreOption = {
+    animationDuration: 300,
+    aria: { enabled: true },
+    grid: { left: 44, right: 12, top: 40, bottom: 32 },
+    legend: { top: 0, left: 0, itemWidth: 12, itemHeight: 10, textStyle: { color: c.ink2 } },
+    tooltip: {
+      ...tooltipBase(),
+      axisPointer: { type: "shadow" as const },
+      formatter: (params: unknown) => {
+        const ps = params as { axisValue: string; seriesName: string; color: string; value: number | null }[];
+        if (!ps.length) return "";
+        return (
+          `<div style="margin-bottom:4px"><strong>${ps[0]?.axisValue ?? ""}</strong></div>` +
+          ps
+            .filter((p) => p.value !== null && p.value !== undefined)
+            .map((p) => row(p.color, p.seriesName, `${num(p.value, 2)} ${unit}`))
+            .join("")
+        );
+      },
+    },
+    xAxis: {
+      type: "category",
+      data: categories,
+      axisLine: { lineStyle: { color: c.baseline } },
+      axisLabel: { color: c.muted },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: "value",
+      axisLabel: { color: c.muted },
+      splitLine: { lineStyle: { color: c.grid } },
+    },
+    series: series.map((s) => ({
+      name: s.name,
+      type: "bar",
+      data: s.values,
+      barMaxWidth: 22,
+      barGap: "15%",
+      itemStyle: {
+        color: s.dashed ? "transparent" : s.color,
+        borderColor: s.color,
+        borderWidth: s.dashed ? 1.5 : 0,
+        borderType: "dashed",
+        borderRadius: [4, 4, 0, 0],
+      },
+      emphasis: { focus: "series" },
+    })),
+  };
+  chart.setOption(option, true);
 }

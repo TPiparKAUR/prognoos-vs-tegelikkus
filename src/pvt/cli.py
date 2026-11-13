@@ -113,7 +113,7 @@ def _cmd_monitor(settings: Settings, args: argparse.Namespace) -> int:
 def _cmd_pair(settings: Settings, args: argparse.Namespace) -> int:
     from pvt.pair import run_pair
 
-    result = run_pair(settings.data_root)
+    result = run_pair(settings.data_root, settings.stations)
     return EXIT_OK if result.n_hourly else EXIT_PROBLEM
 
 

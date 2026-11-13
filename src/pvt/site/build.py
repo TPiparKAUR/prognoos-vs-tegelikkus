@@ -28,14 +28,16 @@ from pvt.pair import (
     LEAD_BUCKETS,
     METHODS,
     PRIMARY_METHOD,
+    climate_table,
     derived_dir,
+    link_climate_station,
     load_forecasts,
     load_truth_t1,
     load_truth_t2,
 )
 from pvt.provenance import ingest_version
 from pvt.score import PRECIP_THRESHOLDS_MM, VARIABLES
-from pvt.stations import xml_stations_path
+from pvt.stations import station_targets
 from pvt.storage import read_json
 from pvt.timeutil import format_utc, utc_now
 
@@ -56,6 +58,15 @@ MODEL_LABELS: Final = {
     "ifs": "ECMWF IFS (0,25°)",
     "aifs-single": "ECMWF AIFS Single (0,25°)",
     "persistence": "Persistents (vaatlus 24 h tagasi)",
+    "kaur_asukoht": "KAURi asukohaprognoos",
+}
+# Sources that are planned but not yet archived (shown as "waiting" on the page).
+PENDING_MODELS: Final = {
+    "kaur_asukoht": (
+        "ilmmicroservice.envir.ee lükkab automaatsed päringud tagasi (ühendus suletakse "
+        "vastuseta, nii arenduskeskkonnast kui GitHubist, 13.11.2026). Vajalik KAURi IT "
+        "lubatud ligipääs; seejärel salvestatakse prognoos igal jooksul jaamade kohal."
+    )
 }
 METHOD_LABELS: Final = {
     "nearest_land": "Lähim maapunkt",
@@ -76,7 +87,7 @@ ATTRIBUTION: Final = [
         "url": "https://www.ilmateenistus.ee",
     },
     {
-        "text": "Aluskaart: © OpenStreetMap contributors (ODbL), geo-maps",
+        "text": "Varukontuur: © OpenStreetMap contributors (ODbL)",
         "url": "https://www.openstreetmap.org/copyright",
     },
 ]
@@ -110,13 +121,29 @@ def _read_table(data_root: Path, name: str) -> pl.DataFrame:
     return pl.read_parquet(p) if p.exists() else pl.DataFrame()
 
 
+MEASURE_COLUMNS: Final = {
+    "t2m": "airtemperature_degC",
+    "wind": "windspeed_m_s",
+    "precip": "precipitations_1h_mm",
+    "pressure": "airpressure_hPa",
+}
+
+
 def stations_geojson(settings: Settings, latest_xml: pl.DataFrame) -> dict[str, Any]:
-    """Return verified stations plus XML-only meteorological stations as GeoJSON."""
-    feats: list[dict[str, Any]] = []
+    """Forecast target stations as GeoJSON with the latest XML observation.
+
+    Targets come from ``station_targets`` (verified climate stations + XML stations more
+    than 1 km from them), so an XML duplicate of a climate station is not a second point.
+    """
     obs_by_station: dict[str, dict[str, Any]] = {}
     if not latest_xml.is_empty():
-        for row in latest_xml.iter_rows(named=True):
-            sid = row["kliima_station_id"] or row["station_id"]
+        linked = latest_xml.with_columns(
+            link_climate_station(climate_table(settings.stations)).alias("_sid")
+        )
+        for row in linked.iter_rows(named=True):
+            sid = row["_sid"]
+            if sid in obs_by_station:
+                continue
             obs_by_station[sid] = {
                 "time_utc": _clean(row["snapshot_time_utc"]),
                 "t2m_degC": _clean(row["airtemperature_degC"]),
@@ -124,49 +151,30 @@ def stations_geojson(settings: Settings, latest_xml: pl.DataFrame) -> dict[str, 
                 "wind_dir_deg": _clean(row["winddirection_deg"]),
                 "gust_m_s": _clean(row["windspeedmax_m_s"]),
                 "precip_1h_mm": _clean(row["precipitations_1h_mm"]),
+                "pressure_hPa": _clean(row["airpressure_hPa"]),
                 "phenomenon": row["phenomenon"],
+                "measures": [k for k, c in MEASURE_COLUMNS.items() if row[c] is not None],
                 "provenance": "toormõõtmine",
             }
-    for s in settings.stations:
-        if s.lat_deg is None or s.lon_deg is None:
-            continue
+    wmo = {s.station_id: s.wmo_code for s in settings.stations}
+    feats: list[dict[str, Any]] = []
+    for row in station_targets(settings).iter_rows(named=True):
+        sid = row["station_id"]
         feats.append(
             {
                 "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [s.lon_deg, s.lat_deg]},
+                "geometry": {"type": "Point", "coordinates": [row["lon_deg"], row["lat_deg"]]},
                 "properties": {
-                    "id": s.station_id,
-                    "name": s.name,
-                    "verified": s.verified,
-                    "height_m_EH2000": s.height_m_eh2000,
-                    "wmo_code": s.wmo_code,
-                    "latest_obs": obs_by_station.get(s.station_id),
+                    "id": sid,
+                    "name": row["name"],
+                    "verified": bool(row["verified"]),
+                    "class": "kliima" if row["verified"] else "xml",
+                    "height_m_EH2000": row["height_m_EH2000"],
+                    "wmo_code": wmo.get(sid),
+                    "latest_obs": obs_by_station.get(sid),
                 },
             }
         )
-    xml_path = xml_stations_path(settings.data_root)
-    if xml_path.exists():
-        known = {s.station_id for s in settings.stations}
-        for row in pl.read_parquet(xml_path).iter_rows(named=True):
-            if row["station_id"] in known:
-                continue
-            feats.append(
-                {
-                    "type": "Feature",
-                    "geometry": {
-                        "type": "Point",
-                        "coordinates": [row["lon_deg"], row["lat_deg"]],
-                    },
-                    "properties": {
-                        "id": row["station_id"],
-                        "name": row["name"],
-                        "verified": False,
-                        "height_m_EH2000": None,
-                        "wmo_code": row["wmo_code"],
-                        "latest_obs": obs_by_station.get(row["station_id"]),
-                    },
-                }
-            )
     return {"type": "FeatureCollection", "features": feats}
 
 
@@ -193,7 +201,9 @@ def station_series(
     )
     fc_cols: list[str | pl.Expr] = [
         "valid_time_utc",
-        pl.col("t2m_hcorr_degC").alias("t2m_degC"),
+        # Height-corrected where the station height is known, else the raw model value
+        # (XML stations, ADR-019); the page labels which one is shown.
+        pl.coalesce("t2m_hcorr_degC", "t2m_degC").alias("t2m_degC"),
         pl.col("wind10m_speed_m_s").alias("wind_speed_m_s"),
         pl.col("wind10m_dir_deg").alias("wind_dir_deg"),
         "mslp_hPa",
@@ -253,6 +263,26 @@ def station_series(
     return out
 
 
+def _availability(bucket: pl.DataFrame) -> dict[str, dict[str, list[str]]]:
+    """Variables with pairs per truth level and network (to disable empty choices)."""
+    out: dict[str, dict[str, list[str]]] = {}
+    if not bucket.height:
+        return out
+    have = (
+        bucket.filter(pl.col("n") > 0, pl.col("sample") == "all")
+        .select("truth_level", "network", "variable")
+        .unique()
+    )
+    for row in have.iter_rows(named=True):
+        out.setdefault(row["truth_level"], {}).setdefault(row["network"], []).append(
+            row["variable"]
+        )
+    for nets in out.values():
+        for v in nets.values():
+            v.sort()
+    return out
+
+
 def _inventory_summary(inventory: Any) -> dict[str, Any] | None:
     """Per-model completeness only (the per-run list stays in status/ecmwf_inventory.json)."""
     if not isinstance(inventory, dict) or not isinstance(inventory.get("models"), dict):
@@ -274,7 +304,7 @@ def build_site(settings: Settings, out_dir: Path, now: dt.datetime | None = None
         for name in ("lead", "bucket", "station", "diff", "precip")
     }
     forecasts = load_forecasts(root)
-    t2, t1 = load_truth_t2(root), load_truth_t1(root)
+    t2, t1 = load_truth_t2(root), load_truth_t1(root, climate_table(settings.stations))
     latest_xml = _latest_xml(root)
 
     status_dir = root / "status"
@@ -328,6 +358,12 @@ def build_site(settings: Settings, out_dir: Path, now: dt.datetime | None = None
             }
             for v in VARIABLES
         },
+        "pending_models": PENDING_MODELS,
+        "availability": _availability(tables["bucket"]),
+        "networks": {
+            "kliima": "Kliimajaamad (kinnitatud, T1 ja T2)",
+            "koik": "Kõik vaatlusjaamad (ka XML-i jaamad, ainult T1)",
+        },
         "lead_buckets": list(LEAD_BUCKETS),
         "precip_thresholds_mm": list(PRECIP_THRESHOLDS_MM),
         "attribution": ATTRIBUTION,
@@ -337,7 +373,8 @@ def build_site(settings: Settings, out_dir: Path, now: dt.datetime | None = None
             "Eksperimentaalne, mitteametlik. Ei asenda KAURi ametlikku prognoosi ega hoiatusi.",
             "Mudelite võrdlus ühisel valimil: samad jooksud, etteanded, jaamad ja tunnid.",
             "Usaldusvahemikku näidatakse alates 10 valiidsuspäevast (plokk-bootstrap).",
-            "KAURi prognoosi skoore ei avaldata enne avaldamisotsust (ADR-012).",
+            "XML-jaamad (kõrgus teadmata) on skoorides ainult T1-ga ja temperatuur ilma "
+            "kõrguskorrektsioonita (ADR-019).",
         ],
     }
     _write(out_dir / "meta.json", meta)

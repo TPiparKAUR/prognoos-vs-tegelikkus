@@ -1,31 +1,29 @@
 // Application state, mirrored to the URL hash so every view is a shareable link.
+// Unknown or unavailable values in a link fall back to defaults (sanitize() in main.ts).
 
-export type Metric = "mae" | "me" | "rmse";
-export type MapModel = "ifs" | "aifs-single" | "diff";
+export type MapMode = "better" | "ifs" | "aifs-single";
 export type StationVar = "t2m" | "wind" | "mslp" | "precip";
 
 export interface State {
-  variable: string;
-  metric: Metric;
-  bucket: string;
   truth: string;
+  network: string;
   method: string;
-  mapModel: MapModel;
+  variable: string;
+  bucket: string;
+  mapMode: MapMode;
   station: string | null;
   stationVar: StationVar;
-  window: string;
 }
 
 export const DEFAULTS: State = {
-  variable: "t2m",
-  metric: "mae",
-  bucket: "D1",
   truth: "T2",
+  network: "kliima",
   method: "nearest_land",
-  mapModel: "ifs",
+  variable: "t2m",
+  bucket: "D1",
+  mapMode: "better",
   station: null,
   stationVar: "t2m",
-  window: "06-06",
 };
 
 type Listener = (s: State, changed: Set<keyof State>) => void;
@@ -57,6 +55,12 @@ export function get(): State {
   return state;
 }
 
+/** Replace the state without notifying (used once after sanitizing a shared link). */
+export function replace(s: State): void {
+  state = s;
+  history.replaceState(null, "", toHash(state));
+}
+
 export function set(patch: Partial<State>): void {
   const changed = new Set<keyof State>();
   for (const [k, v] of Object.entries(patch) as [keyof State, State[keyof State]][]) {
@@ -72,4 +76,6 @@ export function subscribe(l: Listener): void {
   listeners.push(l);
 }
 
-window.addEventListener("hashchange", () => set({ ...DEFAULTS, ...fromHash() }));
+export function onExternalChange(cb: (partial: Partial<State>) => void): void {
+  window.addEventListener("hashchange", () => cb({ ...DEFAULTS, ...fromHash() }));
+}

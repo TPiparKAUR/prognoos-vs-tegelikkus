@@ -12,6 +12,9 @@ export interface Meta {
   primary_method: string;
   truth_levels: Record<string, string>;
   variables: Record<string, { label: string; unit: string; note: string }>;
+  pending_models: Record<string, string>;
+  availability: Record<string, Record<string, string[]>>;
+  networks: Record<string, string>;
   lead_buckets: string[];
   precip_thresholds_mm: number[];
   attribution: { text: string; url: string }[];
@@ -32,6 +35,7 @@ export interface LeadScore {
   truth_level: string;
   interp_method: string;
   sample: string;
+  network: string;
   lead_h: number;
   n: number;
   n_days: number;
@@ -51,6 +55,7 @@ export interface BucketScore extends Omit<LeadScore, "lead_h"> {
 
 export interface StationScore {
   model_id: string;
+  network: string;
   variable: string;
   truth_level: string;
   interp_method: string;
@@ -65,6 +70,7 @@ export interface StationScore {
 
 export interface DiffScore {
   variable: string;
+  network: string;
   truth_level: string;
   interp_method: string;
   lead_bucket: string;
@@ -109,13 +115,16 @@ export interface LatestObs {
   wind_dir_deg: number | null;
   gust_m_s: number | null;
   precip_1h_mm: number | null;
+  pressure_hPa: number | null;
   phenomenon: string | null;
+  measures: string[];
 }
 
 export interface StationProps {
   id: string;
   name: string;
   verified: boolean;
+  class: "kliima" | "xml";
   height_m_EH2000: number | null;
   wmo_code: string | null;
   latest_obs: LatestObs | null;

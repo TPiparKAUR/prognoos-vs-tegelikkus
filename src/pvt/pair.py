@@ -33,12 +33,14 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 import polars as pl
 
+from pvt.config import Station
 from pvt.extract.points import load_points
 from pvt.storage import write_parquet_atomic
 from pvt.timeutil import parse_utc
@@ -102,7 +104,12 @@ def archived_runs(data_root: Path) -> list[tuple[str, dt.datetime, str]]:
 
 
 def load_forecasts(data_root: Path) -> pl.DataFrame:
-    """Deterministic station forecasts of all archived runs (verified stations only)."""
+    """Deterministic station forecasts of all archived runs and stations.
+
+    ``station_class`` is ``kliima`` for verified climate stations and ``xml`` for the
+    observations-XML stations (coordinates from the KAUR XML, no EH2000 height: the
+    height-corrected temperature is null there, ADR-019).
+    """
     frames = []
     runs = archived_runs(data_root)
     for model_id, issue, _ in runs:
@@ -120,7 +127,12 @@ def load_forecasts(data_root: Path) -> pl.DataFrame:
         ).unique()
         verified = weights.filter(pl.col("station_verified"))["station_id"]
         frames.append(
-            pts.filter(pl.col("member") == -1, pl.col("station_id").is_in(verified.implode()))
+            pts.filter(pl.col("member") == -1).with_columns(
+                pl.when(pl.col("station_id").is_in(verified.implode()))
+                .then(pl.lit("kliima"))
+                .otherwise(pl.lit("xml"))
+                .alias("station_class")
+            )
         )
     if not frames:
         return pl.DataFrame()
@@ -161,14 +173,43 @@ def load_truth_t2(data_root: Path) -> pl.DataFrame:
     )
 
 
-def load_truth_t1(data_root: Path) -> pl.DataFrame:
-    """Hourly T1 truth from XML snapshots of the verified (climate) stations."""
+def link_climate_station(climate: pl.DataFrame) -> pl.Expr:
+    """Station id for XML rows: the climate station only if WMO code or name agree.
+
+    The XML lists water-level and other sites within 1 km of climate stations (e.g.
+    "Tooma soojaam 1-4"); distance alone (``kliima_station_id``) would mix them in.
+    """
+    wmo = dict(zip(climate["station_id"], climate["wmo_code"], strict=True))
+    name = dict(zip(climate["station_id"], climate["name"], strict=True))
+    same_wmo = pl.col("wmo_code").is_not_null() & (
+        pl.col("wmo_code") == pl.col("kliima_station_id").replace_strict(wmo, default=None)
+    )
+    same_name = pl.col("station_name") == pl.col("kliima_station_id").replace_strict(
+        name, default=None
+    )
+    return (
+        pl.when(pl.col("kliima_station_id").is_not_null() & (same_wmo | same_name))
+        .then(pl.col("kliima_station_id"))
+        .otherwise(pl.col("station_id"))
+    )
+
+
+def load_truth_t1(data_root: Path, climate: pl.DataFrame | None = None) -> pl.DataFrame:
+    """Hourly T1 truth from XML snapshots: climate stations and XML-only stations.
+
+    ``climate`` (columns ``station_id``, ``name``, ``wmo_code``) links XML rows to the
+    verified climate stations; without it every row keeps its XML station id.
+    """
     x = _read_days(data_root, "obs_xml")
     if x.is_empty():
         return x
     lo, hi = XML_LAG_MIN
+    if climate is not None and climate.height:
+        sid = link_climate_station(climate)
+    else:
+        sid = pl.col("station_id")
     x = (
-        x.filter(pl.col("kliima_station_id").is_not_null())
+        x.with_columns(sid.alias("_sid"))
         .with_columns(
             pl.col("snapshot_time_utc").dt.truncate("1h").alias("valid_time_utc"),
             (
@@ -181,10 +222,10 @@ def load_truth_t1(data_root: Path) -> pl.DataFrame:
         )
         .filter(pl.col("obs_lag_min").is_between(lo, hi, closed="left"))
         .sort("snapshot_time_utc")
-        .unique(["kliima_station_id", "valid_time_utc"], keep="first")
+        .unique(["_sid", "valid_time_utc"], keep="first")
     )
     out = x.select(
-        pl.col("kliima_station_id").alias("station_id"),
+        pl.col("_sid").alias("station_id"),
         "valid_time_utc",
         pl.col("airtemperature_degC").alias("obs_t2m_degC"),
         pl.col("windspeed_m_s").alias("obs_wind_speed_m_s"),
@@ -383,12 +424,32 @@ def build_precip_pairs(forecasts: pl.DataFrame, truth_t2: pl.DataFrame) -> pl.Da
     )
 
 
-def run_pair(data_root: Path) -> PairResult:
+def climate_table(stations: Sequence[Station]) -> pl.DataFrame:
+    """Return the verified climate stations as (station_id, name, wmo_code)."""
+    return pl.DataFrame(
+        [
+            {"station_id": s.station_id, "name": s.name, "wmo_code": s.wmo_code}
+            for s in stations
+            if s.verified
+        ],
+        schema={"station_id": pl.String, "name": pl.String, "wmo_code": pl.String},
+    )
+
+
+def run_pair(data_root: Path, stations: Sequence[Station] = ()) -> PairResult:
     """Recompute all pairs from the archive (idempotent)."""
+    climate = climate_table(stations)
     forecasts = load_forecasts(data_root)
     t2 = load_truth_t2(data_root)
-    t1 = load_truth_t1(data_root)
+    t1 = load_truth_t1(data_root, climate)
     hourly = build_hourly_pairs(forecasts, [t2, t1])
+    if hourly.height:
+        hourly = hourly.with_columns(
+            pl.when(pl.col("station_id").is_in(climate["station_id"].implode()))
+            .then(pl.lit("kliima"))
+            .otherwise(pl.lit("xml"))
+            .alias("station_class")
+        )
     precip = build_precip_pairs(forecasts, t2)
     out = derived_dir(data_root)
     hp, pp = out / "pairs_hourly.parquet", out / "pairs_precip24.parquet"
