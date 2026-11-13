@@ -32,7 +32,12 @@ from urllib3.util.retry import Retry
 
 from pvt import SCHEMA_VERSION
 from pvt.config import ModelConfig, Settings
-from pvt.extract.points import build_weights, derive_points, stencil_points
+from pvt.extract.points import (
+    attach_targets,
+    build_weights,
+    points_from_stencil,
+    stencil_points,
+)
 from pvt.ingest.ecmwf_grib import BoxExtractor, BoxField, GribContentError, read_box_fields
 from pvt.provenance import ingest_version
 from pvt.schemas import (
@@ -285,8 +290,12 @@ def assemble_step_frame(
     steps: Sequence[int],
     params: Sequence[str],
     version: str,
+    optional: Sequence[str] = (),
 ) -> pl.DataFrame:
     """Combine box fields of several steps into a FORECAST_GRID frame.
+
+    Parameters in ``optional`` may be absent for some steps (their columns become null);
+    e.g. IFS ``10fg`` exists in open data for 0-90 h and 150-360 h but not 93-144 h.
 
     Raises
     ------
@@ -302,7 +311,7 @@ def assemble_step_frame(
         if key in by_key:
             raise IngestError(f"duplicate field {key}")
         by_key[key] = fld
-    missing = [(s, p) for s in steps for p in params if (s, p) not in by_key]
+    missing = [(s, p) for s in steps for p in params if p not in optional and (s, p) not in by_key]
     if missing:
         raise IngestError(f"missing fields (step, param): {missing[:10]}")
     extra = sorted({s for s, _ in by_key} - set(steps))
@@ -319,7 +328,10 @@ def assemble_step_frame(
         acc_quantum = 0.0
         gust_start: int | None = None
         for p in params:
-            fld = by_key[(step, p)]
+            maybe = by_key.get((step, p))
+            if maybe is None:
+                continue  # optional parameter absent at this step
+            fld = maybe
             if not (
                 np.array_equal(fld.lat_deg, ref.lat_deg)
                 and np.array_equal(fld.lon_deg, ref.lon_deg)
@@ -538,7 +550,11 @@ def ingest_run(
                 nbytes += fetcher.retrieve(model, issue, batch, params, gfile)
                 fields = read_box_fields(gfile, extractor)
                 gfile.unlink()
-                frames.append(assemble_step_frame(fields, model, issue, batch, params, version))
+                frames.append(
+                    assemble_step_frame(
+                        fields, model, issue, batch, params, version, model.extra_step_params
+                    )
+                )
                 LOG.debug("%s %s: steps %s-%s done", model.model_id, tag, batch[0], batch[-1])
         grid_df = pl.concat(frames).sort(
             ["lead_h", "grid_lat_deg", "grid_lon_deg"], descending=[False, True, False]
@@ -546,7 +562,9 @@ def ingest_run(
         validate(grid_df, FORECAST_GRID, FORECAST_GRID_KEY)
         validate(static_df, FORECAST_GRID_STATIC, FORECAST_GRID_STATIC_KEY)
         _check_accumulation(grid_df)
-        grid_df, static_df, point_df, skipped = reduce_to_stations(settings, grid_df, static_df)
+        grid_df, static_df, weights_df, point_df, skipped = reduce_to_stations(
+            settings, grid_df, static_df
+        )
     except (
         SourceUnavailableError,
         IngestError,
@@ -562,12 +580,12 @@ def ingest_run(
 
     gpath = ecmwf_grid_path(settings.data_root, model.model_id, issue, "grid")
     spath = ecmwf_grid_path(settings.data_root, model.model_id, issue, "static")
-    ppath = ecmwf_grid_path(settings.data_root, model.model_id, issue, "point")
+    wpath = ecmwf_grid_path(settings.data_root, model.model_id, issue, "weights")
     files = {
-        "point": {
-            "path": str(ppath.relative_to(settings.data_root)),
-            "sha256": write_parquet_atomic(point_df, ppath),
-            "rows": point_df.height,
+        "weights": {
+            "path": str(wpath.relative_to(settings.data_root)),
+            "sha256": write_parquet_atomic(weights_df, wpath),
+            "rows": weights_df.height,
         },
         "grid": {
             "path": str(gpath.relative_to(settings.data_root)),
@@ -590,6 +608,16 @@ def ingest_run(
         "steps_missing": missing,
         "stations": point_df.get_column("station_id").n_unique(),
         "stations_skipped_outside_area": skipped,
+        "optional_param_steps": {
+            p: sorted(
+                set(
+                    grid_df.filter(pl.col(STEP_COLUMNS[p]).is_not_null())
+                    .get_column("lead_h")
+                    .to_list()
+                )
+            )
+            for p in model.extra_step_params
+        },
         "grib_gen_proc_id": sorted(set(grid_df.get_column("grib_gen_proc_id").to_list())),
         "retrieved_at_utc": format_utc(utc_now()),
         "bytes_downloaded": nbytes,
@@ -612,13 +640,17 @@ def ingest_run(
 
 def reduce_to_stations(
     settings: Settings, grid_df: pl.DataFrame, static_df: pl.DataFrame
-) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, list[str]]:
-    """Keep only the stencil grid points around the stations and derive station values.
+) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame, list[str]]:
+    """Keep only the stencil grid points around the stations.
+
+    Station values are NOT stored (they are a deterministic function of the stencil values
+    and the weights, see :func:`pvt.extract.points.load_points`); they are derived here once
+    to validate the run.
 
     Returns
     -------
     tuple
-        (stencil grid, stencil static, FORECAST_POINT frame, skipped station ids)
+        (stencil grid, stencil static, weights, FORECAST_POINT frame, skipped station ids)
     """
     targets = station_targets(settings)
     if targets.is_empty():
@@ -630,14 +662,10 @@ def reduce_to_stations(
     on = ["grid_lat_deg", "grid_lon_deg"]
     grid_st = grid_df.join(stencil, on=on, how="semi")
     static_st = static_df.join(stencil, on=on, how="semi")
-    points = (
-        derive_points(grid_st, static_st, weights, targets)
-        .select(list(FORECAST_POINT))
-        .cast(FORECAST_POINT)  # type: ignore[arg-type]
-        .sort(["lead_h", "station_id", "interp_method"])
-    )
+    weights_full = attach_targets(weights, targets)
+    points = points_from_stencil(grid_st, static_st, weights_full)
     validate(points, FORECAST_POINT, FORECAST_POINT_KEY)
-    return grid_st, static_st, points, skipped
+    return grid_st, static_st, weights_full, points, skipped
 
 
 def _check_accumulation(df: pl.DataFrame, eps_mm: float = 1e-9) -> None:
@@ -691,6 +719,7 @@ def ingest(
     fetchers: Sequence[Fetcher] | None = None,
     force: bool = False,
     dry_run: bool = False,
+    max_runs: int | None = None,
 ) -> list[RunResult]:
     """Archive all missing runs of ``models`` in ``[start, end]``.
 
@@ -702,11 +731,11 @@ def ingest(
         One entry per attempted run (skipped complete runs are not listed).
     """
     now = require_utc(now or utc_now())
-    e = settings.ecmwf
-    end = require_utc(end or now - dt.timedelta(hours=e.min_age_hours))
-    start = require_utc(start or now - dt.timedelta(hours=e.lookback_hours))
+    e_cfg = settings.ecmwf
+    end = require_utc(end or now - dt.timedelta(hours=e_cfg.min_age_hours))
+    start = require_utc(start or now - dt.timedelta(hours=e_cfg.lookback_hours))
     fetchers = list(fetchers) if fetchers is not None else make_fetchers(settings)
-    results: list[RunResult] = []
+    todo: list[tuple[dt.datetime, ModelConfig]] = []
     for model_id in models:
         model = settings.models[model_id]
         if start < model.min_issue_time:
@@ -717,17 +746,27 @@ def ingest(
                 format_utc(model.min_issue_time),
             )
         runs = list(iter_runs(max(start, model.min_issue_time), end, model.runs_utc))
-        skipped = 0
-        for issue in runs:
-            if not force and _archived_ok(settings, model, issue):
-                skipped += 1
-                continue
-            results.append(ingest_run(settings, model, issue, fetchers, now, dry_run=dry_run))
+        pending = [r for r in runs if force or not _archived_ok(settings, model, r)]
         LOG.info(
-            "%s: %d runs in window, %d already archived, %d attempted",
+            "%s: %d runs in window, %d already archived",
             model_id,
             len(runs),
-            skipped,
-            len(runs) - skipped,
+            len(runs) - len(pending),
         )
+        todo.extend((r, model) for r in pending)
+    # Newest first across models, so a capped invocation keeps the archive current and
+    # older gaps are filled by later invocations (the rolling archive is ~4 days deep).
+    todo.sort(key=lambda x: (x[0], x[1].model_id), reverse=True)
+    limit = max_runs if max_runs is not None else e_cfg.max_runs_per_invocation
+    deadline = time.monotonic() + 60 * e_cfg.max_minutes_per_invocation
+    results: list[RunResult] = []
+    for issue, model in todo:
+        if len(results) >= limit or time.monotonic() > deadline:
+            LOG.warning(
+                "stopping after %d runs (limit/deadline); %d left for next invocation",
+                len(results),
+                len(todo) - len(results),
+            )
+            break
+        results.append(ingest_run(settings, model, issue, fetchers, now, dry_run=dry_run))
     return results

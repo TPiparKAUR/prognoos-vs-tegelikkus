@@ -24,6 +24,10 @@ steps_per_batch = 12
 maximum_retries = 4
 retry_after_seconds = 20
 http_timeout_seconds = 60
+# One invocation must finish well inside the CI job limit (GitHub job: 110 min), otherwise
+# the archive upload step would not run. Runs are processed newest first.
+max_runs_per_invocation = 12
+max_minutes_per_invocation = 75
 # Pause between index HEAD probes (seconds) to stay below mirror rate limits.
 probe_pause_seconds = 0.05
 
@@ -38,11 +42,13 @@ lon_max_deg = 28.75
 grid_increment_deg = 0.25
 
 [monitor]
-# docs/03 section 7. Only ECMWF is implemented in stage E1; the others are reported
-# as "not_implemented" and do not fail the pipeline yet.
+# docs/03 section 7. obs_xml: age of the newest stored snapshot; kliima: newest valid
+# hour (data appear ~1 day late, published ~03 UTC); kaur_fc: newest stored version
+# (stored only when the content changes; KAUR updates at least daily by noon).
 max_age_hours_ecmwf = 18
 max_age_hours_obs_xml = 2
 max_age_hours_kliima = 48
+max_age_hours_kaur_fc = 36
 # Window for the run inventory (acceptance criterion 1 in docs/06 section 4).
 inventory_days = 14
 min_completeness_fraction = 0.95

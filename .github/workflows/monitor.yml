@@ -1,0 +1,32 @@
+# Freshness + 14-day run inventory. A red run (exit 1) triggers GitHub's failure e-mail to
+# the repository owner (the notification channel until KAUR names another, docs/07).
+name: monitor
+on:
+  schedule:
+    - cron: "53 */6 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PVT_DATA_ROOT: ${{ github.workspace }}/data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: uv run python ci/github_release_sync.py pull --data-root "$PVT_DATA_ROOT" --dataset ecmwf --days 15
+      - run: uv run python ci/github_release_sync.py pull --data-root "$PVT_DATA_ROOT" --dataset obs_xml --dataset kaur_fc --dataset kliima --days 3
+      - id: monitor
+        run: uv run pvt monitor
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: status
+          path: data/status/
+          retention-days: 30
+      - if: steps.monitor.outcome == 'failure'
+        run: exit 1

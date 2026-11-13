@@ -11,6 +11,7 @@ import polars as pl
 import pytest
 
 from pvt.config import Settings
+from pvt.extract.points import load_points
 from pvt.ingest.ecmwf import discover_run, ingest, ingest_run, relative_key
 from pvt.ingest.ecmwf_grib import BoxExtractor, GribContentError, read_box_fields
 from pvt.schemas import (
@@ -126,7 +127,7 @@ def test_complete_run_is_archived_and_valid(settings: Settings) -> None:
     static = pl.read_parquet(ecmwf_grid_path(settings.data_root, "ifs", ISSUE, "static"))
     assert static.height == n_points
 
-    pts = pl.read_parquet(ecmwf_grid_path(settings.data_root, "ifs", ISSUE, "point"))
+    pts = load_points(settings.data_root, "ifs", ISSUE)
     validate(pts, FORECAST_POINT, FORECAST_POINT_KEY)
     assert pts.height == len(TEST_STEPS) * (3 + 3)  # 2 stations x 3 methods
     s1 = pts.filter((pl.col("station_id") == "S1") & (pl.col("lead_h") == 6))
@@ -156,10 +157,21 @@ def test_complete_run_is_archived_and_valid(settings: Settings) -> None:
     assert s2_land["source_uri"].startswith("ecmwf-opendata:20261112/06z/ifs/")
 
 
+def test_gust_is_optional_per_step(settings: Settings) -> None:
+    """IFS open data has no 10fg for 93-144 h; such steps must not fail the run."""
+    f = FakeFetcher("aws", set(TEST_STEPS), drop_at=frozenset({("10fg", 9)}))
+    man = _run(settings, f)
+    assert man["status"] == "complete"
+    assert man["optional_param_steps"] == {"10fg": [0, 3, 6, 12]}
+    pts = load_points(settings.data_root, "ifs", ISSUE)
+    assert pts.filter(pl.col("lead_h") == 9).get_column("gust10m_max_m_s").null_count() == 6
+    assert pts.filter(pl.col("lead_h") == 12).get_column("gust10m_max_m_s").null_count() == 0
+
+
 def test_aifs_has_no_gust(settings: Settings) -> None:
     man = _run(settings, FakeFetcher("aws", set(TEST_STEPS)), model_id="aifs-single")
     assert man["status"] == "complete"
-    pts = pl.read_parquet(ecmwf_grid_path(settings.data_root, "aifs-single", ISSUE, "point"))
+    pts = load_points(settings.data_root, "aifs-single", ISSUE)
     assert pts.get_column("gust10m_max_m_s").null_count() == pts.height
 
 
@@ -305,3 +317,19 @@ def test_wind_direction_is_meteorological(u: float, v: float, expected: float) -
     row = df.select(speed.alias("s"), direction.alias("d")).row(0)
     assert row[0] == pytest.approx(5.0)
     assert row[1] % 360.0 == pytest.approx(expected)
+
+
+def test_invocation_cap_takes_newest_first(settings: Settings) -> None:
+    f = FakeFetcher("aws", set(TEST_STEPS))
+    start = ISSUE - dt.timedelta(hours=6)
+    res = ingest(
+        settings, ["ifs", "aifs-single"], start=start, end=ISSUE, now=NOW, fetchers=[f], max_runs=2
+    )
+    assert [(r.model_id, r.issue_time_utc) for r in res] == [
+        ("ifs", "2026-11-12T06:00:00Z"),
+        ("aifs-single", "2026-11-12T06:00:00Z"),
+    ]
+    rest = ingest(
+        settings, ["ifs", "aifs-single"], start=start, end=ISSUE, now=NOW, fetchers=[f], max_runs=10
+    )
+    assert sorted(r.issue_time_utc for r in rest) == ["2026-11-12T00:00:00Z"] * 2

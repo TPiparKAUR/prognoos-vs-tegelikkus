@@ -1,4 +1,4 @@
-# Alternative CI (GitHub). Primary CI is .gitlab-ci.yml (ADR-010).
+# CI on GitHub (runtime platform since 2026-11-13; .gitlab-ci.yml kept for KAUR GitLab).
 name: ci
 on:
   push:

@@ -29,14 +29,55 @@ def _archive(settings: Settings, issues: list[dt.datetime]) -> None:
         )
 
 
+def _fresh_kaur_sources(settings: Settings, now: dt.datetime) -> None:
+    import dataclasses
+
+    from pvt.config import load_settings
+    from pvt.ingest import kaur_fc, kliima, obs_xml
+
+    real = dataclasses.replace(settings, stations=load_settings(REPO_ROOT / "config").stations)
+    xml = (REPO_ROOT / "tests/fixtures/observations_sample.xml").read_bytes()
+    stamp = int((now - dt.timedelta(minutes=30)).timestamp())
+    obs_xml.store_snapshot(real, xml.replace(b"1794556259", str(stamp).encode()))
+    fc = (REPO_ROOT / "tests/fixtures/forecast_sample.xml").read_bytes()
+    kaur_fc.store_snapshot(settings, fc, settings.kaur_fc_urls[0], now - dt.timedelta(hours=3))
+    t = now - dt.timedelta(hours=20)
+    df = kliima.to_frame(
+        [
+            {
+                "jaam_kood": "AJHARK01",
+                "aasta": t.year,
+                "kuu": t.month,
+                "paev": t.day,
+                "tund": t.hour,
+                "element_kood": "TA",
+                "vaartus": 1.0,
+                "element_yhik_eng": "°C",
+                "avaandmed_ts": "2026-11-12T06:00:04+02:00",
+            }
+        ],
+        "test",
+    )
+    from pvt.storage import day_dir, write_parquet_atomic
+
+    write_parquet_atomic(
+        df, day_dir(settings.data_root, "kliima", t.date()) / f"kliima_hly_{t:%Y-%m-%d}.parquet"
+    )
+
+
 def test_monitor_ok_when_fresh(settings: Settings) -> None:
     _archive(settings, [ISSUE])
-    out = run_monitor(settings, now=ISSUE + dt.timedelta(hours=10))
+    now = ISSUE + dt.timedelta(hours=10)
+    _fresh_kaur_sources(settings, now)
+    out = run_monitor(settings, now=now)
+    assert out.freshness["problems"] == []
     assert out.exit_code == EXIT_OK
     src = out.freshness["sources"]
     assert src["ecmwf:ifs"]["status"] == "ok"
     assert src["ecmwf:ifs"]["age_hours"] == 10.0
-    assert src["obs_xml"]["status"] == "not_implemented"
+    assert src["obs_xml"]["age_hours"] == 0.5
+    assert src["kaur_fc"]["status"] == "ok"
+    assert src["kliima"]["age_hours"] == 20.0
     assert (settings.data_root / "status" / "freshness.json").exists()
 
 
@@ -68,7 +109,7 @@ def test_inventory_lists_missing_runs_with_reason(settings: Settings) -> None:
 
 @pytest.mark.parametrize(
     "step",
-    ["ingest-obs-xml", "ingest-kliima", "ingest-kaur-fc", "pair", "score", "mos", "build-site"],
+    ["pair", "score", "mos", "build-site"],
 )
 def test_pending_steps_exit_with_usage_code(step: str) -> None:
     assert main([step]) == EXIT_USAGE

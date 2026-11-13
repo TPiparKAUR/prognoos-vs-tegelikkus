@@ -86,11 +86,11 @@ def day_dir(data_root: Path, dataset: str, day: dt.date) -> Path:
 def ecmwf_grid_path(data_root: Path, model_id: str, issue_time: dt.datetime, kind: str) -> Path:
     """Return the archive file of one run.
 
-    ``kind`` is ``grid`` (stencil grid points), ``point`` (station values) or ``static``
-    (orography, land-sea mask).
+    ``kind`` is ``grid`` (stencil grid points), ``weights`` (station interpolation
+    weights + station metadata used) or ``static`` (orography, land-sea mask).
     """
     t = require_utc(issue_time)
-    if kind not in ("grid", "point", "static"):
+    if kind not in ("grid", "weights", "static"):
         raise ValueError(f"unknown kind {kind!r}")
     return day_dir(data_root, "ecmwf", t.date()) / f"{model_id}_{run_tag(t)}_{kind}.parquet"
 

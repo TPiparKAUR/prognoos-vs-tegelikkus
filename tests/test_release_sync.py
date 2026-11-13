@@ -29,7 +29,7 @@ def test_names() -> None:
 
 def test_tar_round_trip_is_deterministic(tmp_path: Path) -> None:
     root = tmp_path / "data"
-    f = ecmwf_grid_path(root, "ifs", dt.datetime(2026, 11, 12, 6, tzinfo=UTC), "point")
+    f = ecmwf_grid_path(root, "ifs", dt.datetime(2026, 11, 12, 6, tzinfo=UTC), "weights")
     f.parent.mkdir(parents=True)
     f.write_bytes(b"abc")
     (f.parent / "x.json").write_text("{}")

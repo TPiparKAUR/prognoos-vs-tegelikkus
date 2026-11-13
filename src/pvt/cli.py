@@ -24,9 +24,6 @@ EXIT_OK, EXIT_PROBLEM, EXIT_USAGE, EXIT_CONFIG = 0, 1, 2, 3
 
 # Steps defined in docs/08 that later stages implement.
 _PENDING_STEPS = {
-    "ingest-obs-xml": "E1b (blocked: XML format not yet verified, see reports/stage_1.md)",
-    "ingest-kliima": "E1b (blocked: API table names/syntax not yet verified)",
-    "ingest-kaur-fc": "E1b (blocked: XML format not yet verified)",
     "pair": "E2",
     "score": "E3",
     "mos": "E5",
@@ -71,6 +68,45 @@ def _cmd_ingest_ecmwf(settings: Settings, args: argparse.Namespace) -> int:
     return EXIT_PROBLEM if failed else EXIT_OK
 
 
+def _cmd_ingest_obs_xml(settings: Settings, args: argparse.Namespace) -> int:
+    from pvt.ingest.http import FetchError
+    from pvt.ingest.obs_xml import ObsXmlError, ingest
+
+    try:
+        ingest(settings)
+    except (FetchError, ObsXmlError) as exc:
+        LOG.error("ingest-obs-xml: %s", exc)
+        return EXIT_PROBLEM
+    return EXIT_OK
+
+
+def _cmd_ingest_kaur_fc(settings: Settings, args: argparse.Namespace) -> int:
+    from pvt.ingest.kaur_fc import ingest
+
+    results = ingest(settings)
+    return EXIT_PROBLEM if any(v.startswith("failed") for v in results.values()) else EXIT_OK
+
+
+def _cmd_ingest_kliima(settings: Settings, args: argparse.Namespace) -> int:
+    from pvt.ingest.http import FetchError
+    from pvt.ingest.kliima import KliimaError, ingest
+
+    try:
+        for day, status in ingest(settings).items():
+            LOG.info("kliima %s: %s", day, status)
+    except (FetchError, KliimaError) as exc:
+        LOG.error("ingest-kliima: %s", exc)
+        return EXIT_PROBLEM
+    return EXIT_OK
+
+
+def _cmd_sync_stations(settings: Settings, args: argparse.Namespace) -> int:
+    from pvt.stations import sync_stations
+
+    sync_stations(settings, settings.kliima.base_url)
+    return EXIT_OK
+
+
 def _cmd_monitor(settings: Settings, args: argparse.Namespace) -> int:
     from pvt.monitor.freshness import run_monitor
 
@@ -98,6 +134,18 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--force", action="store_true", help="re-ingest runs already complete")
     e.add_argument("--dry-run", action="store_true", help="discover steps only, write nothing")
     e.set_defaults(func=_cmd_ingest_ecmwf)
+
+    for name, func, help_text in (
+        ("ingest-obs-xml", _cmd_ingest_obs_xml, "snapshot of the KAUR observations XML (T1)"),
+        ("ingest-kaur-fc", _cmd_ingest_kaur_fc, "snapshot of the KAUR 'Eesti prognoos' XML"),
+        ("ingest-kliima", _cmd_ingest_kliima, "validated hourly climate data via API (T2)"),
+        (
+            "sync-stations",
+            _cmd_sync_stations,
+            "regenerate config/stations.toml from the climate API",
+        ),
+    ):
+        sub.add_parser(name, help=help_text).set_defaults(func=func)
 
     m = sub.add_parser("monitor", help="freshness and run inventory; exit 1 if stale")
     m.set_defaults(func=_cmd_monitor)

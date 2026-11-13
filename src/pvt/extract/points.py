@@ -18,7 +18,9 @@ Wind speed/direction are derived from interpolated u/v (meteorological "from" di
 
 from __future__ import annotations
 
+import datetime as dt
 import math
+from pathlib import Path
 from typing import Any, Final
 
 import numpy as np
@@ -221,3 +223,55 @@ def derive_points(
         speed.alias("wind10m_speed_m_s"),
         direction.alias("wind10m_dir_deg"),
     )
+
+
+WEIGHTS_FILE_SCHEMA: dict[str, pl.DataType] = {
+    **WEIGHTS_SCHEMA,
+    "station_lat_deg": pl.Float64(),
+    "station_lon_deg": pl.Float64(),
+    "station_height_m_EH2000": pl.Float64(),
+    "station_verified": pl.Boolean(),
+}
+
+
+def attach_targets(weights: pl.DataFrame, targets: pl.DataFrame) -> pl.DataFrame:
+    """Add the station metadata used for this run (so derivation is self-contained)."""
+    t = targets.select(
+        "station_id",
+        pl.col("lat_deg").alias("station_lat_deg"),
+        pl.col("lon_deg").alias("station_lon_deg"),
+        pl.col("height_m_EH2000").alias("station_height_m_EH2000"),
+        pl.col("verified").alias("station_verified"),
+    )
+    return (
+        weights.join(t, on="station_id", how="left")
+        .select(list(WEIGHTS_FILE_SCHEMA))
+        .sort(["station_id", "interp_method", "grid_lat_deg", "grid_lon_deg"])
+    )
+
+
+def points_from_stencil(
+    grid: pl.DataFrame, static: pl.DataFrame, weights_full: pl.DataFrame
+) -> pl.DataFrame:
+    """FORECAST_POINT rows from archived stencil grid, static fields and weights."""
+    from pvt.schemas import FORECAST_POINT
+
+    targets = weights_full.select(
+        "station_id", pl.col("station_height_m_EH2000").alias("height_m_EH2000")
+    ).unique()
+    return (
+        derive_points(grid, static, weights_full.select(list(WEIGHTS_SCHEMA)), targets)
+        .select(list(FORECAST_POINT))
+        .cast(FORECAST_POINT)  # type: ignore[arg-type]
+        .sort(["lead_h", "station_id", "interp_method"])
+    )
+
+
+def load_points(data_root: Path, model_id: str, issue_time: dt.datetime) -> pl.DataFrame:
+    """Derive the station values of one archived run (FORECAST_POINT layout)."""
+    from pvt.storage import ecmwf_grid_path
+
+    def read(kind: str) -> pl.DataFrame:
+        return pl.read_parquet(ecmwf_grid_path(data_root, model_id, issue_time, kind))
+
+    return points_from_stencil(read("grid"), read("static"), read("weights"))

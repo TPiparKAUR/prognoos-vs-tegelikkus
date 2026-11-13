@@ -88,6 +88,8 @@ class EcmwfSettings:
     retry_after_seconds: int
     http_timeout_seconds: int
     probe_pause_seconds: float
+    max_runs_per_invocation: int
+    max_minutes_per_invocation: int
     area: Area
     step_params: tuple[str, ...]
     static_params: tuple[str, ...]
@@ -100,8 +102,20 @@ class MonitorSettings:
     max_age_hours_ecmwf: int
     max_age_hours_obs_xml: int
     max_age_hours_kliima: int
+    max_age_hours_kaur_fc: int
     inventory_days: int
     min_completeness_fraction: float
+
+
+@dataclass(frozen=True)
+class KliimaSettings:
+    """KAUR climate dataset API (PostgREST)."""
+
+    base_url: str
+    hourly_table: str
+    page_size: int
+    elements: tuple[str, ...]
+    refetch_days: int
 
 
 @dataclass(frozen=True)
@@ -129,6 +143,9 @@ class Settings:
     models: dict[str, ModelConfig]
     monitor: MonitorSettings
     stations: tuple[Station, ...]
+    kliima: KliimaSettings
+    obs_xml_url: str
+    kaur_fc_urls: tuple[str, ...]
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -246,6 +263,8 @@ def load_settings(config_dir: Path | None = None, data_root: Path | None = None)
         retry_after_seconds=int(e["retry_after_seconds"]),
         http_timeout_seconds=int(e["http_timeout_seconds"]),
         probe_pause_seconds=float(e["probe_pause_seconds"]),
+        max_runs_per_invocation=int(e["max_runs_per_invocation"]),
+        max_minutes_per_invocation=int(e["max_minutes_per_invocation"]),
         area=Area(**{k: float(v) for k, v in e["area"].items()}),
         step_params=tuple(p["fields"]["step_params"]),
         static_params=tuple(p["fields"]["static_params"]),
@@ -255,6 +274,7 @@ def load_settings(config_dir: Path | None = None, data_root: Path | None = None)
         max_age_hours_ecmwf=int(m["max_age_hours_ecmwf"]),
         max_age_hours_obs_xml=int(m["max_age_hours_obs_xml"]),
         max_age_hours_kliima=int(m["max_age_hours_kliima"]),
+        max_age_hours_kaur_fc=int(m["max_age_hours_kaur_fc"]),
         inventory_days=int(m["inventory_days"]),
         min_completeness_fraction=float(m["min_completeness_fraction"]),
     )
@@ -265,4 +285,13 @@ def load_settings(config_dir: Path | None = None, data_root: Path | None = None)
         models=_parse_models(p),
         monitor=monitor,
         stations=_parse_stations(st),
+        kliima=KliimaSettings(
+            base_url=str(s["kliima"]["base_url"]),
+            hourly_table=str(s["kliima"]["hourly_table"]),
+            page_size=int(s["kliima"]["page_size"]),
+            elements=tuple(s["kliima"]["elements"]),
+            refetch_days=int(s["kliima"]["refetch_days"]),
+        ),
+        obs_xml_url=str(s["obs_xml"]["url"]),
+        kaur_fc_urls=tuple(s["kaur_fc"]["urls"]),
     )

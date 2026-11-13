@@ -1,0 +1,14 @@
+name: setup-pvt
+description: Python 3.12 + uv + locked dependencies (cached)
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - uses: actions/cache@v4
+      with:
+        path: ~/.cache/uv
+        key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+    - shell: bash
+      run: pip install --quiet "uv==0.11.32" && uv sync --frozen --no-dev

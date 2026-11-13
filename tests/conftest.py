@@ -121,6 +121,7 @@ class FakeFetcher:
     fail_retrieve: bool = False
     lon_first: float = 180.0
     drop_param: str | None = None
+    drop_at: frozenset[tuple[str, int]] = frozenset()
     transform: Callable[[str, int, np.ndarray], np.ndarray] | None = None
     probes: int = 0
     retrieves: int = 0
@@ -142,7 +143,12 @@ class FakeFetcher:
         self.retrieves += 1
         if self.fail_retrieve:
             raise SourceUnavailableError(f"{self.name}: simulated outage")
-        fields = [(p, s) for s in steps for p in params if p != self.drop_param]
+        fields = [
+            (p, s)
+            for s in steps
+            for p in params
+            if p != self.drop_param and (p, s) not in self.drop_at
+        ]
         write_grib(target, fields, issue=issue, lon_first=self.lon_first, transform=self.transform)
         return target.stat().st_size
 

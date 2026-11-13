@@ -1,0 +1,32 @@
+# Validated hourly climate data (T2) from the KAUR climate API; published ~03 UTC,
+# revised values possible -> re-fetch the last 10 days twice a day.
+name: ingest-kliima
+on:
+  schedule:
+    - cron: "41 5,17 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: ingest-kliima
+  cancel-in-progress: false
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PVT_DATA_ROOT: ${{ github.workspace }}/data
+      PVT_INGEST_VERSION: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: uv run python ci/github_release_sync.py pull --data-root "$PVT_DATA_ROOT" --dataset kliima --days 11
+      - run: touch .sync-start
+      - id: ingest
+        run: uv run pvt ingest-kliima
+        continue-on-error: true
+      - if: always()
+        run: uv run python ci/github_release_sync.py push --data-root "$PVT_DATA_ROOT" --since-file .sync-start
+      - if: steps.ingest.outcome == 'failure'
+        run: exit 1

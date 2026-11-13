@@ -1,0 +1,32 @@
+# ECMWF IFS + AIFS Single station extracts, every 2 h at :17 UTC (docs/03 §4).
+# Archive: GitHub Releases archive-YYYY-MM, one tar per dataset-day (ci/github_release_sync.py).
+name: ingest-ecmwf
+on:
+  schedule:
+    - cron: "17 */2 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: ingest-ecmwf
+  cancel-in-progress: false
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PVT_DATA_ROOT: ${{ github.workspace }}/data
+      PVT_INGEST_VERSION: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: uv run python ci/github_release_sync.py pull --data-root "$PVT_DATA_ROOT" --dataset ecmwf --days 5
+      - run: touch .sync-start
+      - id: ingest
+        run: uv run pvt ingest-ecmwf
+        continue-on-error: true
+      - if: always()
+        run: uv run python ci/github_release_sync.py push --data-root "$PVT_DATA_ROOT" --since-file .sync-start
+      - if: steps.ingest.outcome == 'failure'
+        run: exit 1

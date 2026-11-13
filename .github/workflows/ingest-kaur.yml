@@ -1,0 +1,35 @@
+# KAUR observations XML (T1, no history -> every 10 min) and 'Eesti prognoos' XML snapshots.
+# Source: Keskkonnaagentuur, https://www.ilmateenistus.ee (cite KAUR + link).
+name: ingest-kaur
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: ingest-kaur
+  cancel-in-progress: false
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PVT_DATA_ROOT: ${{ github.workspace }}/data
+      PVT_INGEST_VERSION: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: uv run python ci/github_release_sync.py pull --data-root "$PVT_DATA_ROOT" --dataset obs_xml --dataset kaur_fc --days 1
+      - run: touch .sync-start
+      - id: obs
+        run: uv run pvt ingest-obs-xml
+        continue-on-error: true
+      - id: fc
+        run: uv run pvt ingest-kaur-fc
+        continue-on-error: true
+      - if: always()
+        run: uv run python ci/github_release_sync.py push --data-root "$PVT_DATA_ROOT" --since-file .sync-start
+      - if: steps.obs.outcome == 'failure' || steps.fc.outcome == 'failure'
+        run: exit 1

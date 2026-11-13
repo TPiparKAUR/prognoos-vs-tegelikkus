@@ -12,8 +12,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import polars as pl
+
 from pvt.config import Settings
-from pvt.storage import read_json, write_json_atomic
+from pvt.storage import day_dir, read_json, write_json_atomic
 from pvt.timeutil import format_utc, iter_runs, parse_utc, require_utc, run_tag, utc_now
 
 LOG = logging.getLogger(__name__)
@@ -39,6 +41,20 @@ def _load_manifests(root: Path, model_id: str) -> dict[str, dict[str, Any]]:
             m = read_json(p)
             out[m["issue_time_utc"]] = m
     return out
+
+
+def latest_time(
+    root: Path, dataset: str, pattern: str, column: str, now: dt.datetime, days: int = 3
+) -> dt.datetime | None:
+    """Latest value of ``column`` in the dataset's day files of the last ``days`` days."""
+    best: dt.datetime | None = None
+    for back in range(days + 1):
+        ddir = day_dir(root, dataset, (now - dt.timedelta(days=back)).date())
+        for f in sorted(ddir.glob(pattern)) if ddir.exists() else []:
+            value = pl.read_parquet(f, columns=[column]).get_column(column).max()
+            if isinstance(value, dt.datetime) and (best is None or value > best):
+                best = value
+    return best
 
 
 def run_monitor(settings: Settings, now: dt.datetime | None = None) -> MonitorOutcome:
@@ -135,8 +151,22 @@ def run_monitor(settings: Settings, now: dt.datetime | None = None) -> MonitorOu
                     r["detail"],
                 )
 
-    for name in ("obs_xml", "kliima", "kaur_fc"):
-        sources[name] = {"status": "not_implemented"}
+    for name, pattern, column, limit in (
+        ("obs_xml", "obs_xml_*.parquet", "snapshot_time_utc", ms.max_age_hours_obs_xml),
+        ("kaur_fc", "kaur_fc_period_*.parquet", "retrieved_at_utc", ms.max_age_hours_kaur_fc),
+        ("kliima", "kliima_hly_*.parquet", "valid_time_utc", ms.max_age_hours_kliima),
+    ):
+        latest = latest_time(settings.data_root, name, pattern, column, now)
+        age = None if latest is None else round((now - latest).total_seconds() / 3600, 2)
+        stale = age is None or age > limit
+        sources[name] = {
+            "status": "stale" if stale else "ok",
+            "latest_utc": None if latest is None else format_utc(latest),
+            "age_hours": age,
+            "threshold_hours": limit,
+        }
+        if stale:
+            problems.append(f"{name} stale (age {age} h)")
 
     freshness = {
         "generated_at_utc": format_utc(now),

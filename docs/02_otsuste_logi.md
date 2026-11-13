@@ -54,3 +54,28 @@ Formaat: kontekst · alternatiivid · poolt/vastu · valik · tagajärjed · all
 - Fakt (vaatlus 2026-11-13, AWS S3 nimekiri `ecmwf-forecasts`): kuupäevakaustad alates 2023-01-18; IFS 0,25° ja AIFS (`aifs/`, hiljem `aifs-single/`) olemas nt 2024-03-01, 2025-06-01, 2026-03-01. ECMWF-i enda portaal (data.ecmwf.int) hoiab ametlikult ~12 jooksu.
 - Tõlgendus: ajaloo täitmine (backfill) võib olla võimalik ilma MARS-ita. Teadmata: AWS-i säilituspoliitika (pole dokumenteeritud allikat leitud) – sellele ei tohi arhiivi ohutus toetuda.
 - Valik: allikate järjekord `google → aws → azure → ecmwf` (settings.toml; AWS vastas mõõtmisel korduvalt 503 SlowDown); backfill enne 2026-05-13 06 UTC on koodis keelatud (06/18 UTC `scda` voog enne 50r1; AIFS v2 pikkuskraadi viga), kuni see on eraldi läbi testitud.
+
+---
+
+## Muudatused 2026-11-13 (tellija otsused)
+
+**ADR-005 (muudetud) Sademete läved jäävad, 24 h summale kantakse kaasa pakkimisvea piir** (staatus: kinnitatud tellija poolt)
+- Kontekst: ECMWF avaandmete tp lahutus on 0,06–0,25 mm (reports/stage_1.md F6), samas suurusjärgus kui lävi 0,2 mm ja SEEPS-i „kuiv" piir.
+- Valik (tellija: „täpsem variant, kontrollitav ja detailne tulemus"): prognoositud 24 h summa = akumulatsioonide vahe ± (q_alg + q_lõpp)/2 (veerg `precip_acc_quantum_mm`). Iga läve puhul klassifitseeritakse sündmus kolmeks: **jah** (alumine piir ≥ lävi), **ei** (ülemine piir < lävi), **ebamäärane** (muidu). Skoorid arvutatakse kindlatel juhtudel; tundlikkusanalüüs arvestab ebamäärased mõlemat pidi ja nende arv avaldatakse. Negatiivne vahe veapiiri sees → 0 lipuga `clipped_to_zero`.
+- Vaatluse lahutus (PR1H, XML `precipitations`): 0,1 mm – samuti kirja.
+- Tagajärg: läved 0,2/1/5/10/20 mm jäävad (ADR-005 algne), kuid 0,2 mm tulemusega kaasneb alati ebamääraste juhtude osakaal.
+
+**ADR-010 (muudetud) Käituskeskkond: GitHub (avalik repo)** (staatus: kinnitatud tellija poolt)
+- Fakt: repo `TPiparKAUR/prognoos-vs-tegelikkus` on avalik, vaikeharu `claude/modest-johnson-mo063h`; ajastatud töövood käivituvad sellelt harult.
+- Arhiiv: GitHub Release'id `archive-YYYY-MM`, üks tar andmestik-päeva kohta, `archive-meta` jaamaregistrile. Release'id on avalikud → sisaldavad ainult avaandmeid (ECMWF CC BY 4.0, KAUR CC BY 4.0 / viitamise tingimusega XML) ja viidet allikatele. KAURi prognoosi **skoore** ei avaldata (ADR-012); toorarhiiv ei ole skoor.
+- Teavitus: punane ajastatud töövoog → GitHubi e-kiri repo omanikule.
+
+**ADR-015 (muudetud) ECMWF-ist salvestatakse ainult jaamade ümbrus** (staatus: kinnitatud tellija poolt)
+- Eesti kast laaditakse alla ainult otsinguks; arhiveeritakse iga jaama 4 ümbritsevat ruudupunkti + lähim maapunkt 4×4 plokist (stencil), staatilised väljad samades punktides ning interpolatsioonikaalud koos kasutatud jaama metaandmetega (`*_weights.parquet`).
+- Jaamaväärtused (bilineaarne, lähim, lähim maapunkt; kõrguskorrektsioon; tuule kiirus/suund) on deterministlik funktsioon arhiivist: `pvt.extract.points.load_points()`. Neid ei salvestata eraldi, sest punktifail oli mõõtmisel 2,5× suurem kui toorandmed.
+- Jaamad: 25 kliimajaama (kinnitatud) + vaatluste XML-i lisajaamad (kinnitamata, skooridesse ei lähe).
+
+**ADR-017 KAURi asukohaprognoos (ilmateenistus.ee „asukoha-prognoos") on peamine KAURi võrdlusprognoos** (staatus: ootab andmeallikat)
+- Kontekst: tellija soovib eelkõige valideerida asukohapõhist prognoosi (tunnipõhine temperatuur, rõhk, tuul, sademed, nähtus). Leht kuvab Highchartsi meteogrammi, mille andmed laaditakse JavaScriptiga.
+- Teadmata: andmepäringu URL ja vorming (www.ilmateenistus.ee ei olnud arendussessioonist ligipääsetav). Lõpp-punkti ei oletata.
+- Plaan: hetktõmmis igal jooksul jaamade koordinaatidel, toorvastus + Parquet ainult muutusel; skoorid ainult sisevaates kuni avaldamisotsuseni (ADR-012).
