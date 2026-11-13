@@ -55,11 +55,12 @@ täpne lineaarsele väljale, lähim maapunkt merejaamale), tuule suund, valikuli
 käivituse piirang, tar-pakkide determinism. `ruff`, `mypy --strict`: puhtad.
 Päris andmetel: ECMWF IFS + AIFS 2026-11-12 12Z; kliima-API 2026-11-11…13.
 
-## Mida ma EI saanud kontrollida
-- **Vaatluste ja prognoosi XML-i allalaadimist** (`www.ilmateenistus.ee` on selle sessiooni
-  võrgupoliitikaga keelatud). Parserid on testitud sinu kleebitud näidetel; esimene GitHubi
-  `ingest-kaur` jooks on päris test – vaata Actions → ingest-kaur.
-- GitHubi Release'idesse kirjutamist (`gh release create/upload`) – esimene ajastatud jooks.
+## Kontrollitud GitHubis (2026-11-13)
+- `ingest-kliima`: õnnestus esimesel käivitusel.
+- `ingest-kaur`: prognoosi-XML õnnestus kohe; vaatluste XML kukkus kahel esimesel käivitusel
+  (G9, G10), parandatud – kolmas käivitus õnnestus, arhiiv `obs_xml_2026-11-13.tar` ja
+  `meta.tar` Release'is.
+- `ingest-ecmwf`: esimene käsitsi käivitus (kuni 12 jooksu) oli aruande kirjutamise ajal pooleli.
 
 ## Avatud küsimused
 1. **Asukohaprognoos** (ADR-017, sinu peamine soov): vajan andmepäringu URL-i. Kas lubad
@@ -72,6 +73,12 @@ Päris andmetel: ECMWF IFS + AIFS 2026-11-12 12Z; kliima-API 2026-11-11…13.
 4. PR1H: kas tund `tund = h` tähendab summat (h−1, h] UTC? (Eeldatud.)
 5. Avalikud Release'id sisaldavad KAURi toorandmeid (viide + link igas Release'i kirjelduses).
    Kas see sobib või hoiame arhiivi privaatses kohas?
+
+6. **BUFR-toorandmed (kandidaat T1-allikaks):** Keskkonnaportaali „Meteoroloogilise seire
+   andmestik" kirjeldab BUFR-faile (10 min ja 1 h, viimased 24 h, mõõtmisaeg failis, õhurõhk
+   eraldi jaama kõrgusel ja merepinnal) failihoidlas `https://avaandmed.keskkonnaportaal.ee/dhs/Active`.
+   See lahendaks XML-i mõõtmisaja ja rõhu küsimused (G9, küsimus 3). Host on siin blokeeritud
+   ja failiteid ma ei oleta – kas lubad hosti või saadad failihoidla kataloogi näite?
 
 ## Järgmine etapp (E2)
 Paarid ja QC: jaamaväärtused (`load_points`) × T1/T2 vaatlused ühisel valimil, 24 h sademed
