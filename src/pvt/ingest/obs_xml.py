@@ -4,10 +4,13 @@ Source: https://www.ilmateenistus.ee/ilma_andmed/xml/observations.php (KAUR; ter
 Keskkonnaagentuur and link ilmateenistus.ee). Element meanings from the KAUR page
 "Eesti vaatlusandmed XML". The XML has no history, so it is fetched every 10 minutes.
 
-* The root attribute ``timestamp`` is Unix epoch seconds (verified on a 2026-11-13 sample:
-  1794556259 = 2026-11-13T07:50:59Z). It is stored as ``snapshot_time_utc``; individual
-  parameters update hourly or every 10 min (KAUR page), so the exact measurement time per
-  parameter is NOT in the data and is resolved in stage E2.
+* The root attribute ``timestamp`` is Unix epoch seconds and equals the time of the request
+  (observed on GitHub 2026-11-13: request 08:38:43Z -> timestamp 08:38:43Z), NOT the
+  measurement time. It is stored as ``snapshot_time_utc``. Parameters update hourly or every
+  10 min (KAUR page); the measurement time per parameter is resolved in stage E2.
+* Duplicates are detected on the content WITHOUT the timestamp (``content_sha256``).
+* Station names are not unique; the row key is an XML station id built from name, position
+  and WMO code. The nearest climate station within 1 km is given in ``kliima_station_id``.
 * Column names keep the XML element names plus units; e.g. ``airpressure_hPa`` is NOT
   renamed to sea-level pressure because the XML documentation does not say which it is.
 * Raw XML is kept (gzip) only when it differs from the last stored snapshot.
@@ -19,6 +22,7 @@ import datetime as dt
 import gzip
 import hashlib
 import logging
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Final
@@ -57,6 +61,7 @@ NUMERIC_ELEMENTS: Final[dict[str, str]] = {
 OBS_XML: Final[dict[str, pl.DataType]] = {
     "snapshot_time_utc": UTC_TS,
     "station_id": pl.String(),
+    "kliima_station_id": pl.String(),
     "station_name": pl.String(),
     "wmo_code": pl.String(),
     "lat_deg": pl.Float64(),
@@ -65,7 +70,7 @@ OBS_XML: Final[dict[str, pl.DataType]] = {
     **{col: pl.Float64() for col in NUMERIC_ELEMENTS.values()},
     "provenance": pl.String(),
     "source": pl.String(),
-    "raw_sha256": pl.String(),
+    "content_sha256": pl.String(),
     "ingest_version": pl.String(),
     "schema_version": pl.String(),
 }
@@ -137,19 +142,22 @@ def parse_observations(
             raise ObsXmlError("station without name")
         lat = _float(_text(st, "latitude"), "latitude", name)
         lon = _float(_text(st, "longitude"), "longitude", name)
-        sid = xml_station_id(name, lat, lon)
-        # Station names are not unique in the XML (e.g. a meteorological and a hydrological
-        # station share a name), so climate stations are matched by position only.
+        wmo = _text(st, "wmocode")
+        kliima_id = None
         if lat is not None and lon is not None:
-            for v in verified:
-                if haversine_km(v["lat_deg"], v["lon_deg"], lat, lon) < MATCH_RADIUS_KM:
-                    sid = v["station_id"]
-                    break
+            near = [
+                (haversine_km(v["lat_deg"], v["lon_deg"], lat, lon), v["station_id"])
+                for v in verified
+            ]
+            near = [n for n in near if n[0] < MATCH_RADIUS_KM]
+            if near:
+                kliima_id = min(near)[1]
         row: dict[str, Any] = {
             "snapshot_time_utc": snap,
-            "station_id": sid,
+            "station_id": xml_station_id(name, lat, lon, wmo),
+            "kliima_station_id": kliima_id,
             "station_name": name,
-            "wmo_code": _text(st, "wmocode"),
+            "wmo_code": wmo,
             "lat_deg": lat,
             "lon_deg": lon,
             "phenomenon": _text(st, "phenomenon"),
@@ -165,14 +173,32 @@ def parse_observations(
     if exact:
         LOG.warning("obs_xml %s: %d exact duplicate station entries dropped", snap, exact)
         df = df.unique(maintain_order=True)
+    dup = df.filter(pl.col("station_id").is_duplicated())
+    if dup.height:
+        raise ObsXmlError(
+            f"{dup.height} entries share an id although their values differ: "
+            + "; ".join(
+                f"{r['station_name']} ({r['lat_deg']}, {r['lon_deg']}, wmo={r['wmo_code']})"
+                for r in dup.head(12).iter_rows(named=True)
+            )
+        )
     return snap, df
 
 
-def xml_station_id(name: str, lat: float | None, lon: float | None) -> str:
-    """Stable id of an XML-only station: name slug plus position (names are not unique)."""
-    if lat is None or lon is None:
-        return f"XML_{slug(name)}"
-    return f"XML_{slug(name)}_{round(lat * 1000):d}_{round(lon * 1000):d}"
+def xml_station_id(name: str, lat: float | None, lon: float | None, wmo: str | None) -> str:
+    """Stable id of an XML station: name slug, position (1e-3 deg) and WMO code if any."""
+    sid = f"XML_{slug(name)}"
+    if lat is not None and lon is not None:
+        sid += f"_{round(lat * 1000):d}_{round(lon * 1000):d}"
+    if wmo:
+        sid += f"_W{wmo}"
+    return sid
+
+
+def content_digest(xml_bytes: bytes) -> str:
+    """SHA-256 of the document with the request-time ``timestamp`` attribute removed."""
+    body = re.sub(rb'(<observations[^>]*?)\s+timestamp="[^"]*"', rb"\1", xml_bytes, count=1)
+    return hashlib.sha256(body).hexdigest()
 
 
 def _day_parquet(data_root: Path, day: dt.date) -> Path:
@@ -221,6 +247,17 @@ def update_xml_station_registry(data_root: Path, obs: pl.DataFrame) -> bool:
     return True
 
 
+def last_content_digest(data_root: Path, day: dt.date) -> str | None:
+    """Content hash of the newest stored snapshot (today, else yesterday)."""
+    for d in (day, day - dt.timedelta(days=1)):
+        p = _day_parquet(data_root, d)
+        if p.exists():
+            df = pl.read_parquet(p, columns=["snapshot_time_utc", "content_sha256"])
+            if df.height:
+                return str(df.sort("snapshot_time_utc").get_column("content_sha256")[-1])
+    return None
+
+
 def store_snapshot(settings: Settings, xml_bytes: bytes) -> str:
     """Parse and archive one snapshot; returns ``stored``, ``duplicate``.
 
@@ -235,23 +272,24 @@ def store_snapshot(settings: Settings, xml_bytes: bytes) -> str:
         if s.verified
     ]
     snap, obs = parse_observations(xml_bytes, verified)
-    digest = hashlib.sha256(xml_bytes).hexdigest()
+    digest = content_digest(xml_bytes)
     day = snap.date()
     path = _day_parquet(settings.data_root, day)
     existing = pl.read_parquet(path) if path.exists() else pl.DataFrame(schema=OBS_XML)
-    if existing.filter(
-        (pl.col("snapshot_time_utc") == snap) | (pl.col("raw_sha256") == digest)
-    ).height:
-        LOG.info("obs_xml %s: already stored", format_utc(snap))
+    if (
+        last_content_digest(settings.data_root, day) == digest
+        or existing.filter(pl.col("snapshot_time_utc") == snap).height
+    ):
+        LOG.info("obs_xml %s: content unchanged since last snapshot", format_utc(snap))
         return "duplicate"
     obs = obs.with_columns(
         pl.lit("toormõõtmine").alias("provenance"),
         pl.lit("ilmateenistus_xml").alias("source"),
-        pl.lit(digest).alias("raw_sha256"),
+        pl.lit(digest).alias("content_sha256"),
         pl.lit(ingest_version()).alias("ingest_version"),
         pl.lit(SCHEMA_VERSION).alias("schema_version"),
     ).select(list(OBS_XML))
-    combined = pl.concat([existing, obs]).sort(["snapshot_time_utc", "station_name"])
+    combined = pl.concat([existing, obs]).sort(["snapshot_time_utc", "station_id"])
     validate(combined, OBS_XML, OBS_XML_KEY)
     raw = day_dir(settings.data_root, "obs_xml", day) / "raw" / f"{snap:%H%M%S}.xml.gz"
     raw.parent.mkdir(parents=True, exist_ok=True)

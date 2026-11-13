@@ -43,13 +43,15 @@ def test_parse_observations_fixture(real_stations: Settings) -> None:
     assert snap == SNAP  # epoch seconds, UTC
     assert df.height == 9
     harku = df.filter(pl.col("station_name") == "Tallinn-Harku").row(0, named=True)
-    assert harku["station_id"] == "AJHARK01"
+    assert harku["station_id"] == "XML_TALLINN_HARKU_59398_24603_W26038"
+    assert harku["kliima_station_id"] == "AJHARK01"
     assert harku["wmo_code"] == "26038"
     assert harku["airtemperature_degC"] == 2.0
     assert harku["precipitations_1h_mm"] == 0.2
     assert harku["phenomenon"] == "Light shower"
     kur = df.filter(pl.col("station_name") == "Kuressaare linn").row(0, named=True)
     assert kur["station_id"] == "XML_KURESSAARE_LINN_58264_22489"
+    assert kur["kliima_station_id"] is None
     assert kur["wmo_code"] is None
     assert kur["windspeed_m_s"] is None
     narva = df.filter(pl.col("station_name") == "Narva").row(0, named=True)
@@ -69,7 +71,26 @@ def test_store_observations_is_idempotent(real_stations: Settings) -> None:
     targets = station_targets(real_stations)
     extra = targets.filter(~pl.col("verified")).get_column("station_id").to_list()
     # only XML stations that are not climate stations are added (unverified)
-    assert extra == ["XML_HAAPSALU_58945_23555", "XML_KURESSAARE_LINN_58264_22489"]
+    assert extra == ["XML_HAAPSALU_58945_23555_W26123", "XML_KURESSAARE_LINN_58264_22489"]
+
+
+def test_request_timestamp_does_not_defeat_dedup(real_stations: Settings) -> None:
+    """The XML timestamp is the request time; same content later is not stored again."""
+    assert obs_xml.store_snapshot(real_stations, OBS) == "stored"
+    later = OBS.replace(b"1794556259", b"1794556859")  # +10 min, same content
+    assert obs_xml.store_snapshot(real_stations, later) == "duplicate"
+    changed = later.replace(
+        b"<airtemperature>2</airtemperature>", b"<airtemperature>2.1</airtemperature>"
+    )
+    assert obs_xml.store_snapshot(real_stations, changed) == "stored"
+
+
+def test_conflicting_entries_are_reported_by_name(real_stations: Settings) -> None:
+    block = OBS[OBS.index(b"<station>\n<name>Haapsalu") : OBS.index(b"</observations>")]
+    other = block.replace(b"<airtemperature>3.6", b"<airtemperature>9.9")
+    doc = OBS.replace(b"</observations>", other + b"</observations>")
+    with pytest.raises(obs_xml.ObsXmlError, match="Haapsalu"):
+        obs_xml.parse_observations(doc, [])
 
 
 def test_duplicate_station_names_are_kept_apart(real_stations: Settings) -> None:
