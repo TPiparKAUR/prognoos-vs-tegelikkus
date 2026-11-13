@@ -13,7 +13,7 @@ arhitektuur, testid, riskid): [`docs/`](docs/README.md). Etappide aruanded:
 | Etapp | Sisu | Seis |
 |---|---|---|
 | E0 | repo skelett, CI, testid | valmis |
-| E1 | `pvt ingest-ecmwf`, `pvt monitor` | valmis, kontrollitud päris andmetel – vt [reports/stage_1.md](reports/stage_1.md) |
+| E1 | `pvt ingest-ecmwf`, `pvt monitor` | valmis, kontrollitud päris andmetel; ajastus veel käivitamata – vt [reports/stage_1.md](reports/stage_1.md) |
 | E1b | vaatluste XML, kliima-API, KAURi prognoosi XML | **ootab sisendit** (vt aruande avatud küsimused) |
 | E2–E5 | paarid + QC, skoorid, sait, MOS | alustamata |
 

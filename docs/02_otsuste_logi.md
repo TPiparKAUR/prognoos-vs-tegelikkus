@@ -50,7 +50,7 @@ Formaat: kontekst · alternatiivid · poolt/vastu · valik · tagajärjed · all
 - Poolt (c): arhiiv ei sõltu jaamaloendist; uue jaama lisamine ei vaja uut allalaadimist; bilineaarne interpolatsioon ja lähima maapunkti valik on võimalikud tagantjärele; mudelipõhine orograafia ja maa/mere mask salvestatakse (IFS-i ja AIFS-i `z`/`lsm` erinevad – vaadeldud 2026-11-12 06 UTC jooksus, Tallinna lähedal lsm 0,16 vs 0,49). Vastu: maht ~16× suurem kui 25 jaama korral (mõõdetud väärtus: reports/stage_1.md).
 - Valik: (c). Salvestus Parquet (ADR-009); ADR-009 „muudaks"-tingimus (ruudustiku arhiiv → Zarr) ei rakendu, sest kast on väike ja käsitletav punktitabelina. Muudaks: kasti laiendamine või 0,1° IFS (siis Zarr + xarray).
 
-**ADR-016 AWS-peegel on esmane allikas; avaandmete ajalugu on peeglis pikem kui 2–4 päeva** (staatus: ettepanek)
+**ADR-016 Pilvepeeglid on esmased allikad; AWS-peeglis on avaandmete ajalugu pikem kui 2–4 päeva** (staatus: ettepanek)
 - Fakt (vaatlus 2026-11-13, AWS S3 nimekiri `ecmwf-forecasts`): kuupäevakaustad alates 2023-01-18; IFS 0,25° ja AIFS (`aifs/`, hiljem `aifs-single/`) olemas nt 2024-03-01, 2025-06-01, 2026-03-01. ECMWF-i enda portaal (data.ecmwf.int) hoiab ametlikult ~12 jooksu.
 - Tõlgendus: ajaloo täitmine (backfill) võib olla võimalik ilma MARS-ita. Teadmata: AWS-i säilituspoliitika (pole dokumenteeritud allikat leitud) – sellele ei tohi arhiivi ohutus toetuda.
-- Valik: allikate järjekord `aws → google → azure → ecmwf` (settings.toml); backfill enne 2026-05-13 06 UTC on koodis keelatud (06/18 UTC `scda` voog enne 50r1; AIFS v2 pikkuskraadi viga), kuni see on eraldi läbi testitud.
+- Valik: allikate järjekord `google → aws → azure → ecmwf` (settings.toml; AWS vastas mõõtmisel korduvalt 503 SlowDown); backfill enne 2026-05-13 06 UTC on koodis keelatud (06/18 UTC `scda` voog enne 50r1; AIFS v2 pikkuskraadi viga), kuni see on eraldi läbi testitud.

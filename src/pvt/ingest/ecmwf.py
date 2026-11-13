@@ -181,7 +181,7 @@ class OpenDataFetcher:
         """Download with ``Client.retrieve`` (index-based byte ranges)."""
         t = require_utc(issue)
         try:
-            result = self._client(model).retrieve(
+            self._client(model).retrieve(
                 date=int(f"{t:%Y%m%d}"),
                 time=t.hour,
                 stream=model.stream,
@@ -193,7 +193,8 @@ class OpenDataFetcher:
             )
         except (requests.RequestException, OSError, ValueError) as exc:
             raise SourceUnavailableError(f"{self.name}: retrieve failed: {exc}") from exc
-        return int(result.size or 0)
+        # Result.size from multiurl is not the byte count of the target; measure the file.
+        return target.stat().st_size if target.exists() else 0
 
 
 # --------------------------------------------------------------------------- planning

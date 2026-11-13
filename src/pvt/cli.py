@@ -45,8 +45,9 @@ def setup_logging(level: str) -> None:
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level.upper())
-    # Third-party progress bars (tqdm via multiurl) and debug noise do not belong in CI logs.
-    os.environ.setdefault("TQDM_DISABLE", "1")
+    # multiurl forces tqdm progress bars on (disable=False), which floods CI logs; a huge
+    # refresh interval reduces them to one line per download.
+    os.environ.setdefault("TQDM_MININTERVAL", "3600")
     for noisy in ("urllib3", "multiurl", "ecmwf.opendata"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 

@@ -6,10 +6,10 @@ data_root = "data"
 
 [ecmwf]
 # Mirrors tried in order (names as understood by ecmwf-opendata Client(source=...)).
-# Observed 2026-11-13: data.ecmwf.int was not reachable from the development sandbox,
-# AWS and Google mirrors were. AWS answered "SlowDown" under burst HEAD requests,
-# so discovery is rate-limited and falls back to the next mirror.
-sources = ["aws", "google", "azure", "ecmwf"]
+# Observed 2026-11-13 from the development sandbox: data.ecmwf.int not reachable;
+# Google ~1.5-3.5 MB/s without errors; AWS repeatedly answered 503 "SlowDown"
+# (retried successfully, but ~3x slower). Hence Google first.
+sources = ["google", "aws", "azure", "ecmwf"]
 # Scheduled runs look back this far for runs that are not yet archived.
 lookback_hours = 96
 # Do not even probe a run younger than this (ecmwf-opendata README: data available
