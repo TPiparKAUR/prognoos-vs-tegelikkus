@@ -1,0 +1,60 @@
+# Fallback scheduler. Observed 2026-11-13: GitHub did not fire any `schedule` event for this
+# repository (6 h on the old default branch, > 1 h after switching to main), so the archive did
+# not grow. This job dispatches the ingest workflows itself on the documented cadence for ~5.8 h
+# and then dispatches itself again (workflow_dispatch created with GITHUB_TOKEN does start a
+# new run). The regular cron triggers stay in place; duplicate runs are harmless because every
+# step is idempotent and each workflow has its own concurrency group.
+# Stop it: disable this workflow (Actions -> scheduler -> ... -> Disable workflow).
+name: scheduler
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7 */6 * * *"
+permissions:
+  actions: write
+  contents: read
+concurrency:
+  group: scheduler
+  cancel-in-progress: false
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_MINUTES: "340"
+    steps:
+      - name: Dispatch ingest workflows on schedule
+        shell: bash
+        run: |
+          set -u
+          dispatch() {
+            if gh workflow run "$1" --ref main; then
+              echo "$(date -u +%FT%TZ) dispatched $1"
+            else
+              echo "::warning::dispatch of $1 failed"
+            fi
+          }
+          start=$(date +%s)
+          last_ecmwf=0; last_monitor=0; last_kliima_slot=""; last_site_slot=""
+          while [ $(( ($(date +%s) - start) / 60 )) -lt "$RUN_MINUTES" ]; do
+            now=$(date +%s); h=$((10#$(date -u +%H))); m=$((10#$(date -u +%M)))
+            dispatch ingest-kaur.yml                                   # every 10 min (T1 has no history)
+            if [ $((now - last_ecmwf)) -ge 7200 ]; then dispatch ingest-ecmwf.yml; last_ecmwf=$now; fi
+            if [ $((now - last_monitor)) -ge 21600 ]; then dispatch monitor.yml; last_monitor=$now; fi
+            # climate data are published ~03 UTC; fetch twice a day (as the cron 41 5,17)
+            slot="$(date -u +%F)-$((h / 12))"
+            if { [ "$h" -ge 5 ] && [ "$h" -lt 12 ]; } || [ "$h" -ge 17 ]; then
+              if [ "$slot" != "$last_kliima_slot" ]; then dispatch ingest-kliima.yml; last_kliima_slot=$slot; fi
+            fi
+            # web page twice a day after the climate ingest (as the cron 23 7,19)
+            if { [ "$h" -ge 7 ] && [ "$h" -lt 12 ]; } || [ "$h" -ge 19 ]; then
+              if [ "$slot" != "$last_site_slot" ] ; then dispatch site.yml; last_site_slot=$slot; fi
+            fi
+            # sleep to the next 10-minute boundary + 2 min (XML updates 10 min after the hour)
+            sleep $(( 600 - ( $(date +%s) - 120 ) % 600 ))
+          done
+      - name: Chain the next scheduler run
+        if: ${{ !cancelled() }} # cancelling a run stops the chain
+        run: gh workflow run scheduler.yml --ref main
