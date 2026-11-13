@@ -64,9 +64,12 @@ Päris andmetel: ECMWF IFS + AIFS 2026-11-12 12Z; kliima-API 2026-11-11…13.
   280 MB, 122 s; AIFS: 61 sammu, 142 MB, ~60 s; Google-peegel), Release'is
   `ecmwf_2026-11-11/12/13.tar`; 18 jooksu jäi limiidi tõttu järgmisele käivitusele →
   limiit tõstetud 40-le (75 min ajapiir jääb kaitseks).
-- **Ajastatud käivitusi (cron) ei olnud 09:30 UTC seisuga ühelgi töövool**, kuigi töövood on
-  olekus „active" ja vaikeharul. Jälgin; kui need ei käivitu, tuleb repo Actions-seadetes
-  kontrollida, kas ajastatud töövood on lubatud.
+- `ingest-ecmwf` teine käsitsi käivitus (09:32–09:44 UTC) arhiveeris ülejäänud 18 jooksu
+  (kuni 2026-11-09 12Z); 96 h aken on täis, piirangu hoiatust polnud. Google-peeglist
+  IFS 00/12 ~55 s, IFS 06/18 ~32 s, AIFS ~30 s jooksu kohta.
+- **Ajastatud käivitusi (cron) ei olnud ka 10:33 UTC seisuga ühelgi töövool** (ka mitte
+  `ci`/`keepalive`), kuigi töövood on olekus „active" ja vaikeharul. Repo seadeid ma ei muuda;
+  omanik peab kontrollima Settings → Actions → General (Actions lubatud, töövood lubatud).
 
 ## Avatud küsimused
 1. **Asukohaprognoos** (ADR-017, sinu peamine soov): vajan andmepäringu URL-i. Kas lubad
