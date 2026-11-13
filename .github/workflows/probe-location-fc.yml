@@ -23,7 +23,8 @@ jobs:
           from pvt.ingest.http import session
           base = "https://ilmmicroservice.envir.ee/api/forecasts/modelForecastByLocation"
           urls = {
-              "maaamet_hallkaart_capabilities": "https://kaart.maaamet.ee/wms/hallkaart?service=WMS&version=1.3.0&request=GetCapabilities",
+              # JSONP form exactly as the official page builds it (meteogram_loader.js appends &callback=?)
+              "page_jsonp": f"{base}?locationId=784&lang=et&coordinates=59.427711;24.547467&showWarnings=1&callback=pvtprobe",
               "harku_noid": f"{base}?lang=et&coordinates=59.398122;24.60287",
               "page_example": f"{base}?locationId=784&lang=et&coordinates=59.427711;24.547467&showWarnings=1",
           }
