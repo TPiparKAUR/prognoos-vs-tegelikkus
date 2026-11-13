@@ -20,7 +20,7 @@
 - **Vaatluste XML** (`pvt ingest-obs-xml`, T1): ajatempel = Unix epohh (UTC); veerunimed
   järgivad XML-i elemente + ühikuid; toores XML (gzip) ja päeva-Parquet; duplikaadid
   (sama ajatempel või räsi) jäetakse vahele; uued XML-jaamad registrisse
-  `meta/xml_stations.parquet` (kinnitamata, ECMWF arhiveeritakse ka nende kohal).
+  `meta/xml_met_stations.parquet` (kinnitamata, ECMWF arhiveeritakse ka nende kohal).
 - **Eesti prognoos XML** (`pvt ingest-kaur-fc`): est + eng; salvestatakse ainult sisu
   muutumisel; tabelid `kaur_fc_period` ja `kaur_fc_detail` (kohad ja tuulepunktid).
 - **Kliima-API** (`pvt ingest-kliima`, T2): `f_kliima_tund`, elemendid TA, PR1H, WS10M, WD10M,
@@ -41,6 +41,11 @@
 | G5 | Arhiivi maht 25 jaamaga: IFS 00/12 ~121 KB, AIFS ~80 KB jooksu kohta (grid + static + weights) → ~0,7 MB ööpäevas (kastiga oli ~2 MB). | XML-i lisajaamadega kasvab stencil ~3–4×. |
 | G6 | Punktifail (tuletatud väärtused) oli 2,5× suurem kui toorstencil. | Punkte ei salvestata; `load_points()` tuletab need deterministlikult. |
 | G7 | Repo on avalik ja vaikeharu on `claude/modest-johnson-mo063h`; GitHubi CI oli kõigil commit'idel roheline. | Pärast pushi jooksevad ajastatud töövood kohe. |
+| G8 | GitHubist on ilmateenistus.ee kättesaadav; `ingest-kaur-fc` ja `ingest-kliima` töötasid esimesel käivitusel, Release `archive-2026-11` loodi. | Ahel GitHub → Release toimib. |
+| G9 | Vaatluste XML-i `timestamp` = **päringu aeg** (päring 08:38:43Z → 08:38:43Z), mitte mõõtmisaeg. | Duplikaadid tuvastatakse sisu räsiga ilma ajatemplita; mõõtmisaeg tuletatakse E2-s. |
+| G10 | Päris XML-is **korduvad jaamanimed** (esimene jooks: 2, teine 37 konflikti meie võtmega). | Jaama tunnus = nimi + asukoht + WMO; kliimajaam eraldi veerus `kliima_station_id`; konfliktid nimetatakse veateates. |
+| G12 | Päris XML 2026-11-13 08:41Z: 153 kohta, kõigil koordinaadid; õhutemperatuur 95, tuul 40, sademed 49, õhurõhk 27 jaamal; Tooma kliimajaama 1 km raadiuses ~37 kaevu/veetaseme punkti; nimi „Uue-Lõve" kahe eri jaama nimena. | ECMWF arhiveeritakse ainult meteoparameetreid mõõtvatel XML-jaamadel (`meta/xml_met_stations.parquet`). |
+| G11 | KAURi prognoosi XML muutus 08:37 → 08:38 UTC (päevatekst ja Peipsi tekst uuendati) – kaks versiooni salvestati õigesti. | Muutuse tuvastus töötab; KAUR uuendab prognoosi ka hommikul. |
 
 ## Testid
 `uv run pytest`: **76 passed** (võrguta). Uued: XML-parserid fixture'itel (sinu kleebitud

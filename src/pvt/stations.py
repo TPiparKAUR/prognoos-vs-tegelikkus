@@ -6,7 +6,7 @@ Two sources (both KAUR, official):
   climate dataset API table ``f_kliima_jaam_vaatlus`` (station code, current-period
   coordinates and height), which is also the T2 truth source. Verified = coordinates and
   height come from that table.
-* ``<data_root>/meta/xml_stations.parquet`` -- all stations seen in the observations XML
+* ``<data_root>/meta/xml_met_stations.parquet`` -- all stations seen in the observations XML
   (name, WMO code, coordinates). Written by ``pvt ingest-obs-xml``. These have no height
   source and are therefore ``verified = false`` (excluded from scores, docs/08), but ECMWF
   values are still archived at their location.
@@ -149,7 +149,11 @@ def render_stations_toml(
 
 def xml_stations_path(data_root: Path) -> Path:
     """Registry of stations seen in the observations XML."""
-    return data_root / "meta" / "xml_stations.parquet"
+    return data_root / "meta" / "xml_met_stations.parquet"
+
+
+#: First registry version (2026-11-13) also listed groundwater sites; removed on update.
+LEGACY_XML_REGISTRY = "xml_stations.parquet"
 
 
 def station_targets(settings: Settings) -> pl.DataFrame:

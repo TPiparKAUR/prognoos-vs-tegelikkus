@@ -67,11 +67,26 @@ def test_store_observations_is_idempotent(real_stations: Settings) -> None:
     assert set(df.get_column("provenance").unique()) == {"toormõõtmine"}
     assert (ddir / "raw" / "075059.xml.gz").exists()
     reg = pl.read_parquet(xml_stations_path(real_stations.data_root))
-    assert reg.height == 9
+    assert reg.height == 9  # all fixture stations report at least one met element
     targets = station_targets(real_stations)
     extra = targets.filter(~pl.col("verified")).get_column("station_id").to_list()
     # only XML stations that are not climate stations are added (unverified)
     assert extra == ["XML_HAAPSALU_58945_23555_W26123", "XML_KURESSAARE_LINN_58264_22489"]
+
+
+def test_registry_skips_non_meteorological_sites(real_stations: Settings) -> None:
+    well = (
+        b"<station>\n<name>Kaev-211</name>\n<wmocode/>\n<longitude>26.27</longitude>\n"
+        b"<latitude>58.87</latitude>\n<phenomenon/>\n<visibility/>\n<precipitations/>\n"
+        b"<airpressure/>\n<relativehumidity/>\n<airtemperature/>\n<winddirection/>\n"
+        b"<windspeed/>\n<windspeedmax/>\n<waterlevel>12</waterlevel>\n<waterlevel_eh2000/>\n"
+        b"<watertemperature/>\n<uvindex/>\n<sunshineduration/>\n<globalradiation/>\n"
+        b"</station>\n"
+    )
+    doc = OBS.replace(b"</observations>", well + b"</observations>")
+    assert obs_xml.store_snapshot(real_stations, doc) == "stored"
+    reg = pl.read_parquet(xml_stations_path(real_stations.data_root))
+    assert "Kaev-211" not in reg.get_column("name").to_list()
 
 
 def test_request_timestamp_does_not_defeat_dedup(real_stations: Settings) -> None:

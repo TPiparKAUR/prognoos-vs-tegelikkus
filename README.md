@@ -74,7 +74,7 @@ from pvt.extract.points import load_points
   obs_xml/YYYY/MM/DD/obs_xml_<date>.parquet + raw/<HHMMSS>.xml.gz
   kaur_fc/YYYY/MM/DD/kaur_fc_{period,detail}_<date>.parquet + raw/<HHMM>_<lang>.xml.gz
   kliima/YYYY/MM/DD/kliima_hly_<date>.parquet
-  meta/xml_stations.parquet
+  meta/xml_met_stations.parquet
   status/freshness.json, status/ecmwf_inventory.json
 ```
 

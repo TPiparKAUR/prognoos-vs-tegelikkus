@@ -34,7 +34,13 @@ from pvt.config import Settings
 from pvt.ingest.http import fetch_bytes, session
 from pvt.provenance import ingest_version
 from pvt.schemas import UTC_TS, SchemaError, validate
-from pvt.stations import MATCH_RADIUS_KM, haversine_km, slug, xml_stations_path
+from pvt.stations import (
+    LEGACY_XML_REGISTRY,
+    MATCH_RADIUS_KM,
+    haversine_km,
+    slug,
+    xml_stations_path,
+)
 from pvt.storage import day_dir, write_parquet_atomic
 from pvt.timeutil import UTC, format_utc
 
@@ -84,6 +90,13 @@ XML_STATIONS: Final[dict[str, pl.DataType]] = {
     "lon_deg": pl.Float64(),
     "first_seen_utc": UTC_TS,
 }
+#: XML elements that make a station relevant for forecast verification.
+MET_COLUMNS: Final = (
+    "airtemperature_degC",
+    "windspeed_m_s",
+    "precipitations_1h_mm",
+    "airpressure_hPa",
+)
 
 MAX_XML_BYTES: Final = 5_000_000
 
@@ -206,17 +219,28 @@ def _day_parquet(data_root: Path, day: dt.date) -> Path:
 
 
 def update_xml_station_registry(data_root: Path, obs: pl.DataFrame) -> bool:
-    """Add stations not yet in ``meta/xml_stations.parquet``; return True if changed.
+    """Add meteorological stations not yet in ``meta/xml_met_stations.parquet``.
 
-    Existing entries are kept unchanged (a coordinate change is logged, not applied) so
-    the registry file only changes when a station appears.
+    Only stations reporting at least one of MET_COLUMNS are registered (the XML also lists
+    ~40 groundwater/water-level sites around Tooma, observed 2026-11-13, which need no
+    forecasts). Existing entries are kept unchanged (a coordinate change is logged, not
+    applied) so the registry file only changes when a station appears.
+
+    Returns
+    -------
+    bool
+        True if the registry changed.
     """
     path = xml_stations_path(data_root)
+    (path.parent / LEGACY_XML_REGISTRY).unlink(missing_ok=True)
     cur = pl.read_parquet(path) if path.exists() else pl.DataFrame(schema=XML_STATIONS)
+    if cur.columns != list(XML_STATIONS):
+        cur = pl.DataFrame(schema=XML_STATIONS)
+    met = pl.any_horizontal([pl.col(c).is_not_null() for c in MET_COLUMNS])
     known = {r["station_id"]: r for r in cur.iter_rows(named=True)}
     new_rows = []
     for r in obs.filter(
-        pl.col("lat_deg").is_not_null() & pl.col("lon_deg").is_not_null()
+        pl.col("lat_deg").is_not_null() & pl.col("lon_deg").is_not_null() & met
     ).iter_rows(named=True):
         k = known.get(r["station_id"])
         if k is None:
